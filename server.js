@@ -38,6 +38,11 @@ function writeJson(f, v) {
 }
 
 let colis = readJson(DB_FILE, []);
+// migration : ancien « validé » = reporté au registre
+for (const c of colis) {
+  if (!c.etat) { c.etat = c.validatedAt ? 'reporte' : 'recu'; c.reporteAt = c.validatedAt || null; c.remisAt = null; }
+  if (!c.type) c.type = 'C';
+}
 let sessions = new Set(readJson(SESS_FILE, []));
 let version = Date.now();
 
@@ -84,13 +89,15 @@ const isHttps = req => req.headers['x-forwarded-proto'] === 'https';
 
 // ---------- lecture d'étiquette par Claude (si clé API) ----------
 const PROMPT = `Photo d'une étiquette de colis (pas forcément droite). Lis-la attentivement et extrais :
-- numero : le numéro de colis qui commence par « FR » (lettres FR suivies de chiffres/lettres). Recopie-le exactement, sans espaces. S'il n'y en a aucun, prends le petit numéro imprimé à côté du nom du destinataire.
+- numero : le numéro de suivi du colis ou du recommandé (souvent « FR… », mais aussi « 6A… », « 8R… », « XC… », « RL… », « CB… », « 1K… »…). Recopie-le exactement, sans espaces. S'il n'y en a aucun, prends le petit numéro imprimé à côté du nom du destinataire.
+- type : « R » si c'est un recommandé (mention « recommandé », « lettre recommandée », « R1/R2/R3 », avis de réception), sinon « C ».
+- cie : le numéro de compagnie du destinataire s'il est écrit (ex. « 7e Cie », « 7 CIE », « 7ème compagnie » → « 7 »), sinon vide.
 - nom : NOM de famille du destinataire
 - prenom : prénom du destinataire
 - produit : ce que contient le colis ou à défaut l'expéditeur / la marque (ex. « Colis Amazon », « Vinted »), court.
 - tel : numéro de téléphone du destinataire s'il est écrit (chiffres seulement, sinon vide).
-- infos : les autres indications utiles près du destinataire : société / compagnie / unité, service, bâtiment, étage, chambre, mentions comme « fragile » ou « contre signature ». Sépare-les par « · ». Pas l'adresse postale complète, pas l'expéditeur.
-Réponds UNIQUEMENT avec ce JSON : {"numero":"","nom":"","prenom":"","produit":"","tel":"","infos":""} — chaîne vide si illisible, n'invente rien.`;
+- infos : les autres indications utiles près du destinataire : société / compagnie / unité, service, bâtiment, étage, chambre, mentions comme « fragile » ou « contre signature ». Sépare-les par « · ». Pas l'adresse postale complète, pas l'expéditeur, pas la compagnie (déjà dans cie).
+Réponds UNIQUEMENT avec ce JSON : {"numero":"","type":"C","cie":"","nom":"","prenom":"","produit":"","tel":"","infos":""} — chaîne vide si illisible, n'invente rien.`;
 
 async function lireEtiquette(b64) {
   const r = await fetch('https://api.anthropic.com/v1/messages', {
@@ -152,16 +159,33 @@ const server = http.createServer(async (req, res) => {
         const it = {
           id: crypto.randomBytes(8).toString('hex'), numero, numKey: numKey(numero),
           produit: clean(b.produit), nom: clean(b.nom, 100), prenom: clean(b.prenom, 100),
-          tel: clean(b.tel, 30), infos: clean(b.infos, 500), ts: Date.now(), validatedAt: null
+          tel: clean(b.tel, 30), infos: clean(b.infos, 500), obs: clean(b.obs, 500),
+          type: b.type === 'R' ? 'R' : 'C', cie: clean(b.cie, 30), vaguemestre: clean(b.vaguemestre, 60) || SIGNATURE,
+          ts: Date.now(), etat: 'recu', reporteAt: null, remisAt: null
         };
         colis.push(it); save();
         return send(res, 201, { item: it, version });
       }
-      let m = p.match(/^\/api\/colis\/([a-f0-9]+)\/(valider|restaurer)$/);
+      let m = p.match(/^\/api\/colis\/([a-f0-9]+)\/etat$/);
       if (m && req.method === 'POST') {
         const it = colis.find(c => c.id === m[1]);
         if (!it) return send(res, 404, { error: 'introuvable' });
-        it.validatedAt = m[2] === 'valider' ? Date.now() : null; save();
+        const b = await readBody(req, 2000);
+        if (!['recu', 'reporte', 'remis'].includes(b.etat)) return send(res, 400, { error: 'état inconnu' });
+        it.etat = b.etat;
+        if (b.etat === 'recu') { it.reporteAt = null; it.remisAt = null; }
+        if (b.etat === 'reporte') { it.reporteAt = it.reporteAt || Date.now(); it.remisAt = null; }
+        if (b.etat === 'remis') { it.reporteAt = it.reporteAt || Date.now(); it.remisAt = Date.now(); }
+        save();
+        return send(res, 200, { item: it, version });
+      }
+      m = p.match(/^\/api\/colis\/([a-f0-9]+)$/);
+      if (m && req.method === 'PATCH') {
+        const it = colis.find(c => c.id === m[1]);
+        if (!it) return send(res, 404, { error: 'introuvable' });
+        const b = await readBody(req, 5000);
+        if (typeof b.obs === 'string') it.obs = clean(b.obs, 500);
+        save();
         return send(res, 200, { item: it, version });
       }
       if (p === '/api/lire' && req.method === 'POST') {

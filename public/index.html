@@ -49,12 +49,25 @@ li.item{background:var(--card);border-radius:12px;padding:12px 12px 12px 16px;di
 .nm{font-weight:600;font-size:17px}
 .pr{color:var(--mute);font-size:14px}
 .no{font-variant-numeric:tabular-nums;font-size:14px;overflow-wrap:anywhere}
-.dt{font-size:12.5px;color:var(--mute);white-space:nowrap}
-.val{grid-row:1/span 5;grid-column:2;min-height:48px;min-width:48px;border-radius:10px;border:1.5px solid var(--ok);background:transparent;color:var(--ok);font:600 14px Inter,sans-serif;padding:0 12px;cursor:pointer}
-.msg{grid-column:1/-1;display:flex;gap:8px;flex-wrap:wrap;margin-top:6px}
+.dt{font-size:12.5px;color:var(--mute)}
+li.item>*:not(.val){grid-column:1}
+.val{grid-row:1/span 4;align-self:start;grid-column:2;min-height:48px;min-width:48px;border-radius:10px;border:1.5px solid var(--ok);background:transparent;color:var(--ok);font:600 14px Inter,sans-serif;padding:0 12px;cursor:pointer}
+.msg{grid-column:1/-1!important;display:flex;gap:8px;flex-wrap:wrap;margin-top:6px}
 .cp,.wa{min-height:44px;border-radius:10px;font:600 14px Inter,sans-serif;padding:0 14px;cursor:pointer;display:inline-flex;align-items:center;text-decoration:none}
 .cp{border:1.5px solid var(--ink);background:transparent;color:var(--ink)}
 .wa{background:#1f8f4e;color:#fff;border:0}
+.seg{display:grid;grid-template-columns:1fr 1fr;gap:6px;background:var(--line);padding:4px;border-radius:12px}
+.seg button{min-height:44px;border:0;border-radius:9px;background:transparent;color:var(--ink);font:600 15px Inter;cursor:pointer}
+.seg button[aria-pressed=true]{background:var(--ink);color:var(--card)}
+select{font:16px Inter,sans-serif;padding:11px 12px;border:1.5px solid var(--line);border-radius:10px;background:transparent;color:var(--ink);width:100%;min-height:46px}
+.vg{font-size:13px;color:var(--mute)}
+.tabs{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;margin:28px 0 6px}
+.tabs button{min-height:48px;border-radius:10px;border:1.5px solid var(--ink);background:transparent;color:var(--ink);font:600 14px Inter;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px}
+.tabs button[aria-selected=true]{background:var(--ink);color:var(--card)}
+.tabs b{font:800 13px Archivo;background:var(--acc);color:#fff;border-radius:999px;padding:0 7px;min-width:22px}
+.bdg{display:inline-block;font:800 12px Archivo;border-radius:6px;padding:1px 6px;margin-right:6px;vertical-align:2px;background:var(--tape);color:#fff}
+.bdg.r{background:#2457c5}
+.ob{font-size:14px;font-style:italic}
 .empty{text-align:center;color:var(--mute);padding:28px 10px;background:var(--card);border-radius:12px;opacity:.85}
 .toast{position:fixed;left:50%;bottom:calc(20px + env(safe-area-inset-bottom));transform:translateX(-50%);background:var(--ink);color:var(--card);border-radius:12px;padding:10px 10px 10px 16px;display:none;gap:12px;align-items:center;box-shadow:0 8px 24px rgba(0,0,0,.3);z-index:5;max-width:92vw}
 .toast button{background:transparent;border:1.5px solid var(--card);color:var(--card);border-radius:8px;min-height:40px;padding:0 12px;font:600 14px Inter;cursor:pointer}
@@ -77,7 +90,7 @@ li.item{background:var(--card);border-radius:12px;padding:12px 12px 12px 16px;di
 <body>
 <div class="wrap">
   <div class="top"><h1>Scan colis</h1><button class="link" id="logout" type="button">Déconnexion</button></div>
-  <p class="sub">Photo de l'étiquette → infos remplies → on enregistre.</p>
+  <p class="sub">Photo de l'étiquette → infos remplies → reporté au registre → remis.</p>
 
   <section class="label">
     <button class="scan" id="scanBtn" type="button">
@@ -90,14 +103,18 @@ li.item{background:var(--card);border-radius:12px;padding:12px 12px 12px 16px;di
     <img class="prev" id="prev" alt="Photo du colis">
 
     <form id="f" autocomplete="off">
-      <label>Numéro du colis (FR…)<input id="num" class="num" required placeholder="Rempli au scan"></label>
+      <div class="seg" role="group" aria-label="Type"><button type="button" data-t="C" aria-pressed="true">C · Colis</button><button type="button" data-t="R" aria-pressed="false">R · Recommandé</button></div>
+      <label>Numéro du colis / recommandé<input id="num" class="num" required placeholder="Rempli au scan"></label>
       <label>Produit<input id="prod" placeholder="Ex. colis Amazon, Vinted…"></label>
       <div class="row2">
         <label>Nom<input id="nom" autocapitalize="characters"></label>
         <label>Prénom<input id="prenom" autocapitalize="words"></label>
       </div>
+      <label>Compagnie<select id="cie"><option value="">—</option><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option><option>6</option><option>7</option><option value="DAF">DAF</option><option value="Cadre">Cadre</option><option value="Autre">Autre</option></select></label>
       <label>Téléphone (pour WhatsApp)<input id="tel" type="tel" inputmode="tel" placeholder="06 12 34 56 78"></label>
-      <label>Compagnie / autres infos<input id="infos" placeholder="Société, unité, bâtiment, mentions…"></label>
+      <label>Autres infos (unité, bâtiment, mentions)<input id="infos" placeholder="Société, bâtiment, fragile…"></label>
+      <label>Observations<input id="obs" placeholder="Abîmé, volumineux, armoire forte…"></label>
+      <div class="vg" id="vg"></div>
       <div class="actions">
         <button class="btn" type="reset" id="clr">Effacer</button>
         <button class="btn main" type="submit">Enregistrer</button>
@@ -105,8 +122,8 @@ li.item{background:var(--card);border-radius:12px;padding:12px 12px 12px 16px;di
     </form>
   </section>
 
-  <div class="listhead"><h2>À reporter</h2><span class="count" id="count">0</span></div>
-  <div class="search"><input id="q" type="search" placeholder="Rechercher un nom, un numéro FR, une société…"></div>
+  <div class="tabs" role="tablist"><button role="tab" data-tab="recu" aria-selected="true">À reporter <b id="n-recu">0</b></button><button role="tab" data-tab="reporte" aria-selected="false">À remettre <b id="n-reporte">0</b></button><button role="tab" data-tab="remis" aria-selected="false">Remis</button></div>
+  <div class="search"><input id="q" type="search" placeholder="Rechercher nom, numéro, Cie…"></div>
   <ul id="list"></ul>
   <p class="note" id="store"></p>
   <p class="note"><button class="link" id="testAlarm" type="button">Tester l'alarme</button></p>
@@ -122,7 +139,7 @@ li.item{background:var(--card);border-radius:12px;padding:12px 12px 12px 16px;di
 const $=id=>document.getElementById(id);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const numKey=n=>String(n||'').toUpperCase().replace(/[^A-Z0-9]/g,'').replace(/^FR/,'');
-let items=[],ver=0,lecture='locale',SIGN='Julien MERCERON',lastDel=null,toastT=null,actx=null;
+let tab='recu',ctype='C',items=[],ver=0,lecture='locale',SIGN='Julien MERCERON',lastDel=null,toastT=null,actx=null;
 
 const fmt=ts=>{const d=new Date(ts);return d.toLocaleDateString('fr-FR',{day:'2-digit',month:'2-digit',year:'numeric'})+' · '+d.toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'})};
 function status(msg,cls,spin){const s=$('status');s.className='status '+(cls||'');s.innerHTML=(spin?'<span class="spin"></span>':'')+'<span></span>';s.lastChild.textContent=msg||''}
@@ -155,13 +172,13 @@ function beepAlarm(){
 }
 function alarm(ex,test){
   const qui=[ex.prenom,(ex.nom||'').toUpperCase()].filter(Boolean).join(' ')||'sans nom';
-  $('amsg').textContent=`${ex.numero} — ${qui}. Scanné le ${fmt(ex.ts)}${ex.validatedAt?', déjà validé le '+fmt(ex.validatedAt):', encore dans la liste'}.`;
+  $('amsg').textContent=`${ex.numero} — ${qui}. Scanné le ${fmt(ex.ts)}${ex.remisAt?', remis le '+fmt(ex.remisAt):ex.reporteAt?', reporté le '+fmt(ex.reporteAt)+', pas encore remis':', pas encore reporté'}.`;
   const a=$('alarm');a.classList.remove('on');void a.offsetWidth;a.classList.add('on');
   beepAlarm();try{navigator.vibrate&&navigator.vibrate([300,100,300,100,300])}catch(e){}
   if(test)return;
   $('f').reset();$('prev').style.display='none';status('Produit déjà scanné.','err');
 }
-$('testAlarm').onclick=()=>alarm({numero:'FRTEST',nom:'Test',prenom:'',ts:Date.now(),validatedAt:null},true);
+$('testAlarm').onclick=()=>alarm({numero:'FRTEST',nom:'Test',prenom:'',ts:Date.now()},true);
 $('alarm').onclick=()=>$('alarm').classList.remove('on');
 const findDup=n=>{const k=numKey(n);return k?items.find(i=>numKey(i.numero)===k):null};
 
@@ -173,18 +190,25 @@ function msgOf(i){
 function waNum(t){let d=String(t||'').replace(/[^0-9+]/g,'');if(!d)return'';if(d.startsWith('+'))d=d.slice(1);else if(d.startsWith('00'))d=d.slice(2);else if(d.length===10&&d[0]==='0')d='33'+d.slice(1);return /^[0-9]{8,15}$/.test(d)?d:''}
 function render(){
   const q=$('q').value.trim().toLowerCase();
-  const open=items.filter(i=>!i.validatedAt);
-  const list=open.slice().sort((a,b)=>b.ts-a.ts).filter(i=>!q||[i.numero,i.produit,i.nom,i.prenom,i.infos,i.tel].join(' ').toLowerCase().includes(q));
-  $('count').textContent=open.length;
+  const n={recu:0,reporte:0,remis:0};items.forEach(i=>n[i.etat||'recu']++);
+  $('n-recu').textContent=n.recu;$('n-reporte').textContent=n.reporte;
+  let list=items.filter(i=>(i.etat||'recu')===tab).filter(i=>!q||[i.numero,i.produit,i.nom,i.prenom,i.infos,i.tel,i.obs,cieTxt(i.cie)].join(' ').toLowerCase().includes(q));
+  list.sort((a,b)=>tab==='remis'?(b.remisAt||0)-(a.remisAt||0):b.ts-a.ts);
+  if(tab==='remis')list=list.slice(0,100);
+  const act={recu:['Reporté ✓','reporte'],reporte:['Remis ✓','remis']}[tab];
+  const vide={recu:'Rien à reporter. Scanne un colis !',reporte:'Aucun colis en attente de remise.',remis:'Aucun colis remis pour l\'instant.'}[tab];
   $('list').innerHTML=list.length?list.map(i=>`<li class="item">
-    <div class="nm">${esc((i.nom||'').toUpperCase())} ${esc(i.prenom)}${!i.nom&&!i.prenom?'<span style="color:var(--mute)">Sans nom</span>':''}</div>
-    <button class="val" data-id="${esc(i.id)}" type="button">Validé ✓</button>
+    <div class="nm"><span class="bdg ${i.type==='R'?'r':''}">${i.type==='R'?'R':'C'}</span>${esc((i.nom||'').toUpperCase())} ${esc(i.prenom)}${!i.nom&&!i.prenom?'<span style="color:var(--mute)">Sans nom</span>':''}${i.cie?` <span class="pr">· ${esc(cieTxt(i.cie))}</span>`:''}</div>
+    ${act?`<button class="val" data-id="${esc(i.id)}" data-to="${act[1]}" type="button">${act[0]}</button>`:''}
     <div class="pr">${esc(i.produit||'—')}</div>
     ${i.infos?`<div class="pr">${esc(i.infos)}</div>`:''}
+    ${i.obs?`<div class="ob">${esc(i.obs)}</div>`:''}
     <div class="no">${esc(i.numero)}</div>
-    <div class="dt">${esc(fmt(i.ts))}</div>
-    <div class="msg"><button class="cp" data-id="${esc(i.id)}" type="button">Copier le message</button>${waNum(i.tel)?`<a class="wa" href="https://wa.me/${waNum(i.tel)}?text=${encodeURIComponent(msgOf(i))}" target="_blank" rel="noopener">WhatsApp</a>`:''}</div></li>`).join('')
-    :`<li class="empty">${open.length?'Aucun colis ne correspond.':'Aucun colis en attente. Scanne le premier !'}</li>`;
+    <div class="dt">Reçu ${esc(fmt(i.ts))}${i.vaguemestre?' · '+esc(i.vaguemestre):''}</div>
+    ${i.reporteAt?`<div class="dt">Reporté ${esc(fmt(i.reporteAt))}</div>`:''}
+    ${i.remisAt?`<div class="dt">Remis ${esc(fmt(i.remisAt))}</div>`:''}
+    ${tab!=='remis'?`<div class="msg"><button class="cp" data-id="${esc(i.id)}" type="button">Copier le message</button>${waNum(i.tel)?`<a class="wa" href="https://wa.me/${waNum(i.tel)}?text=${encodeURIComponent(msgOf(i))}" target="_blank" rel="noopener">WhatsApp</a>`:''}</div>`:''}</li>`).join('')
+    :`<li class="empty">${q?'Aucun colis ne correspond.':vide}</li>`;
 }
 async function refresh(){
   try{const j=await api('/api/colis?v='+ver);if(!j.same){items=j.items;ver=j.version;render()}$('store').textContent='Liste partagée sur tous tes appareils · '+items.length+' colis en base';}
@@ -223,7 +247,7 @@ $('cam').onchange=async e=>{
   await refresh();
   const dup=findDup(num);if(dup)return alarm(dup);
   const set=(id,v)=>{v=String(v||'').trim();if(v)$(id).value=v};
-  set('num',num);set('prod',lab.produit);set('nom',lab.nom);set('prenom',lab.prenom);set('tel',lab.tel);set('infos',lab.infos);
+  set('num',num);set('prod',lab.produit);set('nom',lab.nom);set('prenom',lab.prenom);set('tel',lab.tel);set('infos',lab.infos);if(lab.type==='R')setType('R');{const c=String(lab.cie||'').match(/\d+/);if(c&&+c[0]>=1&&+c[0]<=7)$('cie').value=c[0]}
   const miss=[['num','numéro'],['nom','nom'],['prenom','prénom'],['prod','produit']].filter(([id])=>!$(id).value.trim());
   status(miss.length?'Lu, sauf : '+miss.map(x=>x[1]).join(', ')+'. Complète puis enregistre.':'Tout est lu, vérifie puis enregistre.',miss.length>2?'err':'ok');
   (miss.length?$(miss[0][0]):$('num')).focus();
@@ -235,15 +259,19 @@ $('f').onsubmit=async e=>{
   const numero=$('num').value.trim().replace(/\s+/g,'');if(!numero){$('num').focus();return}
   const dup=findDup(numero);if(dup)return alarm(dup);
   try{
-    const j=await api('/api/colis',{method:'POST',body:{numero,produit:$('prod').value,nom:$('nom').value,prenom:$('prenom').value,tel:$('tel').value,infos:$('infos').value}});
+    const j=await api('/api/colis',{method:'POST',body:{numero,produit:$('prod').value,nom:$('nom').value,prenom:$('prenom').value,tel:$('tel').value,infos:$('infos').value,obs:$('obs').value,cie:$('cie').value,type:ctype,vaguemestre:SIGN}});
     items.push(j.item);ver=j.version;render();
-    $('f').reset();$('prev').style.display='none';status('Enregistré le '+fmt(j.item.ts)+'.','ok');
+    $('f').reset();setType('C');$('prev').style.display='none';status('Enregistré le '+fmt(j.item.ts)+'.','ok');
   }catch(err){if(err.status===409&&err.existing)alarm(err.existing);else if(err.status!==401)status('Échec de l\'enregistrement, réessaie.','err')}
 };
-$('clr').onclick=()=>{$('prev').style.display='none';status('')};
+$('clr').onclick=()=>{setType('C');$('prev').style.display='none';status('')};
 $('q').oninput=render;
 $('shClose').onclick=()=>{$('sheet').style.display='none'};
 
+function setType(t){ctype=t;document.querySelectorAll('.seg button').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.t===t)))}
+document.querySelector('.seg').onclick=e=>{const b=e.target.closest('button');if(b)setType(b.dataset.t)};
+document.querySelector('.tabs').onclick=e=>{const b=e.target.closest('button');if(!b)return;tab=b.dataset.tab;document.querySelectorAll('.tabs button').forEach(x=>x.setAttribute('aria-selected',String(x===b)));render()};
+const cieTxt=c=>!c?'':(/^\d+$/.test(c)?c+(c==='1'?'re':'e')+' Cie':c);
 $('list').onclick=async e=>{
   const cp=e.target.closest('.cp');
   if(cp){const it=items.find(i=>i.id===cp.dataset.id);if(!it)return;const m=msgOf(it);
@@ -251,15 +279,17 @@ $('list').onclick=async e=>{
     catch(err){$('mtxt').value=m;$('sheet').style.display='flex';$('mtxt').focus();$('mtxt').select()}
     return}
   const b=e.target.closest('.val');if(!b)return;
-  b.disabled=true;
-  try{const j=await api(`/api/colis/${encodeURIComponent(b.dataset.id)}/valider`,{method:'POST'});
+  const it=items.find(i=>i.id===b.dataset.id);if(!it)return;
+  b.disabled=true;const before=it.etat||'recu';
+  try{const j=await api(`/api/colis/${encodeURIComponent(it.id)}/etat`,{method:'POST',body:{etat:b.dataset.to}});
     const k=items.findIndex(i=>i.id===j.item.id);if(k>=0)items[k]=j.item;ver=j.version;render();
-    lastDel=j.item;$('tmsg').textContent=`${(j.item.nom||'').toUpperCase()} ${j.item.prenom||''} validé`.trim();
+    lastDel={id:it.id,etat:before};
+    $('tmsg').textContent=`${(it.nom||'').toUpperCase()} ${it.prenom||''}`.trim()+(b.dataset.to==='remis'?' remis':' reporté');
     $('toast').style.display='flex';clearTimeout(toastT);toastT=setTimeout(()=>{$('toast').style.display='none';lastDel=null},5000);
   }catch(err){b.disabled=false}
 };
-$('undo').onclick=async()=>{if(!lastDel)return;const it=lastDel;lastDel=null;$('toast').style.display='none';
-  try{const j=await api(`/api/colis/${encodeURIComponent(it.id)}/restaurer`,{method:'POST'});const k=items.findIndex(i=>i.id===j.item.id);if(k>=0)items[k]=j.item;ver=j.version;render()}catch(e){}};
+$('undo').onclick=async()=>{if(!lastDel)return;const u=lastDel;lastDel=null;$('toast').style.display='none';
+  try{const j=await api(`/api/colis/${encodeURIComponent(u.id)}/etat`,{method:'POST',body:{etat:u.etat}});const k=items.findIndex(i=>i.id===j.item.id);if(k>=0)items[k]=j.item;ver=j.version;render()}catch(e){}};
 
 /* ---------- connexion ---------- */
 function showLogin(){$('login').style.display='flex';setTimeout(()=>$('pw').focus(),50)}
@@ -270,7 +300,7 @@ $('logout').onclick=async()=>{try{await api('/api/logout',{method:'POST'})}catch
 
 let poll=null;
 async function start(){
-  try{const me=await api('/api/me');lecture=me.lecture;SIGN=me.signature||SIGN}catch(e){return}
+  try{const me=await api('/api/me');lecture=me.lecture;SIGN=me.signature||SIGN;$('vg').textContent='Vaguemestre : '+SIGN+' · date et heure de réception automatiques'}catch(e){return}
   await refresh();clearInterval(poll);poll=setInterval(refresh,4000);
 }
 document.addEventListener('touchend',unlockAudio,{once:true});document.addEventListener('click',unlockAudio,{once:true});
