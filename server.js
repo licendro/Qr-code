@@ -54,7 +54,8 @@ function save() {
   } catch (e) {}
 }
 
-const numKey = n => String(n || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+// FR1283838 et 1283838 = même colis
+const numKey = n => String(n || '').toUpperCase().replace(/[^A-Z0-9]/g, '').replace(/^FR/, '');
 const clean = (v, max = 300) => String(v ?? '').trim().slice(0, max);
 
 // ---------- helpers HTTP ----------
@@ -146,7 +147,7 @@ const server = http.createServer(async (req, res) => {
         const b = await readBody(req, 50000);
         const numero = clean(b.numero, 80).replace(/\s+/g, '');
         if (!numero) return send(res, 400, { error: 'numéro manquant' });
-        const existing = colis.find(c => c.numKey === numKey(numero));
+        const existing = colis.find(c => numKey(c.numero) === numKey(numero));
         if (existing) return send(res, 409, { error: 'doublon', existing });
         const it = {
           id: crypto.randomBytes(8).toString('hex'), numero, numKey: numKey(numero),

@@ -109,6 +109,7 @@ li.item{background:var(--card);border-radius:12px;padding:12px 12px 12px 16px;di
   <div class="search"><input id="q" type="search" placeholder="Rechercher un nom, un numéro FR, une société…"></div>
   <ul id="list"></ul>
   <p class="note" id="store"></p>
+  <p class="note"><button class="link" id="testAlarm" type="button">Tester l'alarme</button></p>
 </div>
 
 <div class="toast" id="toast"><span id="tmsg"></span><button id="undo" type="button">Annuler</button></div>
@@ -120,7 +121,7 @@ li.item{background:var(--card);border-radius:12px;padding:12px 12px 12px 16px;di
 {
 const $=id=>document.getElementById(id);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const numKey=n=>String(n||'').toUpperCase().replace(/[^A-Z0-9]/g,'');
+const numKey=n=>String(n||'').toUpperCase().replace(/[^A-Z0-9]/g,'').replace(/^FR/,'');
 let items=[],ver=0,lecture='locale',SIGN='Julien MERCERON',lastDel=null,toastT=null,actx=null;
 
 const fmt=ts=>{const d=new Date(ts);return d.toLocaleDateString('fr-FR',{day:'2-digit',month:'2-digit',year:'numeric'})+' · '+d.toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'})};
@@ -135,25 +136,34 @@ async function api(path,opt={}){
 }
 
 /* ---------- son + alarme ---------- */
+function makeWav(){
+  const sr=22050,dur=1.4,n=Math.floor(sr*dur),buf=new ArrayBuffer(44+n),v=new DataView(buf);
+  const w=(o,t)=>{for(let i=0;i<t.length;i++)v.setUint8(o+i,t.charCodeAt(i))};
+  w(0,'RIFF');v.setUint32(4,36+n,true);w(8,'WAVEfmt ');v.setUint32(16,16,true);v.setUint16(20,1,true);v.setUint16(22,1,true);
+  v.setUint32(24,sr,true);v.setUint32(28,sr,true);v.setUint16(32,1,true);v.setUint16(34,8,true);w(36,'data');v.setUint32(40,n,true);
+  for(let i=0;i<n;i++){const t=i/sr,seg=Math.floor(t/.2),f=seg%2?520:1040,on=(t%.2)<.17;v.setUint8(44+i,on?(Math.sin(2*Math.PI*f*t)>=0?250:6):128)}
+  return URL.createObjectURL(new Blob([buf],{type:'audio/wav'}));
+}
+const snd=new Audio(makeWav());snd.preload='auto';let sndReady=false,beeping=false;
 function unlockAudio(){
-  try{actx=actx||new (window.AudioContext||window.webkitAudioContext)();if(actx.state==='suspended')actx.resume();
-    const o=actx.createOscillator(),g=actx.createGain();g.gain.value=0;o.connect(g).connect(actx.destination);o.start();o.stop(actx.currentTime+.01)}catch(e){}
+  if(sndReady)return;
+  try{snd.muted=true;const p=snd.play();if(p&&p.then)p.then(()=>{if(!beeping){snd.pause();snd.currentTime=0}snd.muted=false;sndReady=true}).catch(()=>{snd.muted=false});else{snd.pause();snd.muted=false;sndReady=true}}catch(e){snd.muted=false}
 }
 function beepAlarm(){
-  if(!actx)return;
-  try{const t=actx.currentTime,g=actx.createGain();g.gain.value=1;g.connect(actx.destination);
-    for(let i=0;i<6;i++){const o=actx.createOscillator();o.type='square';o.frequency.value=i%2?520:1040;o.connect(g);o.start(t+i*.22);o.stop(t+i*.22+.2)}
-  }catch(e){}
+  beeping=true;sndReady=true;setTimeout(()=>beeping=false,1600);
+  try{snd.muted=false;snd.volume=1;snd.currentTime=0;const p=snd.play();if(p&&p.catch)p.catch(()=>{})}catch(e){}
 }
-function alarm(ex){
+function alarm(ex,test){
   const qui=[ex.prenom,(ex.nom||'').toUpperCase()].filter(Boolean).join(' ')||'sans nom';
   $('amsg').textContent=`${ex.numero} — ${qui}. Scanné le ${fmt(ex.ts)}${ex.validatedAt?', déjà validé le '+fmt(ex.validatedAt):', encore dans la liste'}.`;
   const a=$('alarm');a.classList.remove('on');void a.offsetWidth;a.classList.add('on');
   beepAlarm();try{navigator.vibrate&&navigator.vibrate([300,100,300,100,300])}catch(e){}
+  if(test)return;
   $('f').reset();$('prev').style.display='none';status('Produit déjà scanné.','err');
 }
+$('testAlarm').onclick=()=>alarm({numero:'FRTEST',nom:'Test',prenom:'',ts:Date.now(),validatedAt:null},true);
 $('alarm').onclick=()=>$('alarm').classList.remove('on');
-const findDup=n=>{const k=numKey(n);return k?items.find(i=>i.numKey===k||numKey(i.numero)===k):null};
+const findDup=n=>{const k=numKey(n);return k?items.find(i=>numKey(i.numero)===k):null};
 
 /* ---------- liste ---------- */
 function msgOf(i){
@@ -263,6 +273,7 @@ async function start(){
   try{const me=await api('/api/me');lecture=me.lecture;SIGN=me.signature||SIGN}catch(e){return}
   await refresh();clearInterval(poll);poll=setInterval(refresh,4000);
 }
+document.addEventListener('touchend',unlockAudio,{once:true});document.addEventListener('click',unlockAudio,{once:true});
 document.addEventListener('visibilitychange',()=>{if(!document.hidden)refresh()});
 render();start();
 }
