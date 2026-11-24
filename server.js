@@ -1,0 +1,191 @@
+// Scan colis — serveur sans dépendance (Node 20+)
+'use strict';
+const http = require('http');
+const fs = require('fs');
+const path = require('path');
+const crypto = require('crypto');
+
+// ---------- config (.env) ----------
+const ROOT = __dirname;
+try {
+  for (const line of fs.readFileSync(path.join(ROOT, '.env'), 'utf8').split(/\r?\n/)) {
+    const m = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*)\s*$/);
+    if (m && !(m[1] in process.env)) process.env[m[1]] = m[2].replace(/^["']|["']$/g, '');
+  }
+} catch (e) { /* pas de .env */ }
+
+const PORT = Number(process.env.PORT) || 3000;
+const PASSWORD = process.env.APP_PASSWORD || '';
+const API_KEY = process.env.ANTHROPIC_API_KEY || '';
+const MODEL = process.env.ANTHROPIC_MODEL || 'claude-haiku-5-5';
+const SIGNATURE = process.env.SIGNATURE || 'Julien MERCERON';
+if (!PASSWORD || PASSWORD === 'change-moi') {
+  console.error('⚠  Définis APP_PASSWORD dans le fichier .env avant de lancer l\'app.');
+  process.exit(1);
+}
+
+// ---------- stockage (fichiers JSON, écriture atomique + sauvegarde quotidienne) ----------
+const DATA = path.join(ROOT, 'data');
+const DB_FILE = path.join(DATA, 'colis.json');
+const SESS_FILE = path.join(DATA, 'sessions.json');
+fs.mkdirSync(path.join(DATA, 'backups'), { recursive: true });
+
+const readJson = (f, d) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch (e) { return d; } };
+function writeJson(f, v) {
+  const tmp = f + '.tmp';
+  fs.writeFileSync(tmp, JSON.stringify(v, null, 1));
+  fs.renameSync(tmp, f);
+}
+
+let colis = readJson(DB_FILE, []);
+let sessions = new Set(readJson(SESS_FILE, []));
+let version = Date.now();
+
+function save() {
+  version = Date.now();
+  writeJson(DB_FILE, colis);
+  const day = new Date().toISOString().slice(0, 10);
+  const bk = path.join(DATA, 'backups', `colis-${day}.json`);
+  try { fs.copyFileSync(DB_FILE, bk); } catch (e) {}
+  // garde 60 jours de sauvegardes
+  try {
+    const files = fs.readdirSync(path.join(DATA, 'backups')).sort();
+    for (const f of files.slice(0, Math.max(0, files.length - 60))) fs.unlinkSync(path.join(DATA, 'backups', f));
+  } catch (e) {}
+}
+
+const numKey = n => String(n || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+const clean = (v, max = 300) => String(v ?? '').trim().slice(0, max);
+
+// ---------- helpers HTTP ----------
+function send(res, code, obj, headers = {}) {
+  const body = JSON.stringify(obj);
+  res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', ...headers });
+  res.end(body);
+}
+function readBody(req, limit = 12 * 1024 * 1024) {
+  return new Promise((ok, ko) => {
+    let size = 0; const chunks = [];
+    req.on('data', c => { size += c.length; if (size > limit) { ko(new Error('trop gros')); req.destroy(); } else chunks.push(c); });
+    req.on('end', () => { try { ok(chunks.length ? JSON.parse(Buffer.concat(chunks).toString('utf8')) : {}); } catch (e) { ko(e); } });
+    req.on('error', ko);
+  });
+}
+function cookies(req) {
+  const o = {};
+  for (const p of String(req.headers.cookie || '').split(';')) {
+    const i = p.indexOf('='); if (i > 0) o[p.slice(0, i).trim()] = decodeURIComponent(p.slice(i + 1).trim());
+  }
+  return o;
+}
+const authed = req => sessions.has(cookies(req).sid);
+const isHttps = req => req.headers['x-forwarded-proto'] === 'https';
+
+// ---------- lecture d'étiquette par Claude (si clé API) ----------
+const PROMPT = `Photo d'une étiquette de colis (pas forcément droite). Lis-la attentivement et extrais :
+- numero : le numéro de colis qui commence par « FR » (lettres FR suivies de chiffres/lettres). Recopie-le exactement, sans espaces. S'il n'y en a aucun, prends le petit numéro imprimé à côté du nom du destinataire.
+- nom : NOM de famille du destinataire
+- prenom : prénom du destinataire
+- produit : ce que contient le colis ou à défaut l'expéditeur / la marque (ex. « Colis Amazon », « Vinted »), court.
+- tel : numéro de téléphone du destinataire s'il est écrit (chiffres seulement, sinon vide).
+- infos : les autres indications utiles près du destinataire : société / compagnie / unité, service, bâtiment, étage, chambre, mentions comme « fragile » ou « contre signature ». Sépare-les par « · ». Pas l'adresse postale complète, pas l'expéditeur.
+Réponds UNIQUEMENT avec ce JSON : {"numero":"","nom":"","prenom":"","produit":"","tel":"","infos":""} — chaîne vide si illisible, n'invente rien.`;
+
+async function lireEtiquette(b64) {
+  const r = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: { 'x-api-key': API_KEY, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
+    body: JSON.stringify({
+      model: MODEL, max_tokens: 500,
+      messages: [{ role: 'user', content: [
+        { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: b64 } },
+        { type: 'text', text: PROMPT }
+      ] }]
+    })
+  });
+  const j = await r.json();
+  if (!r.ok) throw new Error(j?.error?.message || ('API ' + r.status));
+  const txt = (j.content || []).map(c => c.text || '').join('');
+  const m = txt.match(/\{[\s\S]*\}/);
+  if (!m) throw new Error('réponse illisible');
+  return JSON.parse(m[0]);
+}
+
+// ---------- routes ----------
+const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.png': 'image/png', '.svg': 'image/svg+xml', '.webmanifest': 'application/manifest+json' };
+
+const server = http.createServer(async (req, res) => {
+  const url = new URL(req.url, 'http://x');
+  const p = url.pathname;
+  try {
+    if (p === '/api/login' && req.method === 'POST') {
+      const b = await readBody(req, 10000);
+      const a = Buffer.from(String(b.password || '')), e = Buffer.from(PASSWORD);
+      if (a.length !== e.length || !crypto.timingSafeEqual(a, e)) {
+        await new Promise(r => setTimeout(r, 1200));
+        return send(res, 401, { error: 'Mot de passe incorrect' });
+      }
+      const sid = crypto.randomBytes(32).toString('hex');
+      sessions.add(sid); writeJson(SESS_FILE, [...sessions]);
+      return send(res, 200, { ok: true }, { 'Set-Cookie': `sid=${sid}; Path=/; HttpOnly; SameSite=Lax; Max-Age=31536000${isHttps(req) ? '; Secure' : ''}` });
+    }
+    if (p.startsWith('/api/')) {
+      if (!authed(req)) return send(res, 401, { error: 'non connecté' });
+
+      if (p === '/api/logout' && req.method === 'POST') {
+        sessions.delete(cookies(req).sid); writeJson(SESS_FILE, [...sessions]);
+        return send(res, 200, { ok: true }, { 'Set-Cookie': 'sid=; Path=/; Max-Age=0' });
+      }
+      if (p === '/api/me') return send(res, 200, { ok: true, lecture: API_KEY ? 'claude' : 'locale', signature: SIGNATURE });
+
+      if (p === '/api/colis' && req.method === 'GET') {
+        if (url.searchParams.get('v') === String(version)) return send(res, 200, { same: true, version });
+        return send(res, 200, { version, items: colis });
+      }
+      if (p === '/api/colis' && req.method === 'POST') {
+        const b = await readBody(req, 50000);
+        const numero = clean(b.numero, 80).replace(/\s+/g, '');
+        if (!numero) return send(res, 400, { error: 'numéro manquant' });
+        const existing = colis.find(c => c.numKey === numKey(numero));
+        if (existing) return send(res, 409, { error: 'doublon', existing });
+        const it = {
+          id: crypto.randomBytes(8).toString('hex'), numero, numKey: numKey(numero),
+          produit: clean(b.produit), nom: clean(b.nom, 100), prenom: clean(b.prenom, 100),
+          tel: clean(b.tel, 30), infos: clean(b.infos, 500), ts: Date.now(), validatedAt: null
+        };
+        colis.push(it); save();
+        return send(res, 201, { item: it, version });
+      }
+      let m = p.match(/^\/api\/colis\/([a-f0-9]+)\/(valider|restaurer)$/);
+      if (m && req.method === 'POST') {
+        const it = colis.find(c => c.id === m[1]);
+        if (!it) return send(res, 404, { error: 'introuvable' });
+        it.validatedAt = m[2] === 'valider' ? Date.now() : null; save();
+        return send(res, 200, { item: it, version });
+      }
+      if (p === '/api/lire' && req.method === 'POST') {
+        if (!API_KEY) return send(res, 501, { error: 'pas de clé API' });
+        const b = await readBody(req);
+        const b64 = String(b.image || '').replace(/^data:image\/\w+;base64,/, '');
+        if (!b64) return send(res, 400, { error: 'image manquante' });
+        try { return send(res, 200, await lireEtiquette(b64)); }
+        catch (e) { console.error('lecture:', e.message); return send(res, 502, { error: e.message }); }
+      }
+      return send(res, 404, { error: 'route inconnue' });
+    }
+
+    // fichiers statiques
+    const file = path.join(ROOT, 'public', p === '/' ? 'index.html' : path.normalize(p).replace(/^(\.\.[\/\\])+/, ''));
+    if (!file.startsWith(path.join(ROOT, 'public'))) { res.writeHead(403); return res.end(); }
+    fs.readFile(file, (err, buf) => {
+      if (err) { res.writeHead(404); return res.end('404'); }
+      res.writeHead(200, { 'Content-Type': MIME[path.extname(file)] || 'application/octet-stream', 'Cache-Control': 'no-cache' });
+      res.end(buf);
+    });
+  } catch (e) {
+    console.error(e);
+    send(res, 500, { error: 'erreur serveur' });
+  }
+});
+
+server.listen(PORT, () => console.log(`Scan colis en ligne sur le port ${PORT} — ${colis.length} colis en base, lecture ${API_KEY ? 'Claude' : 'locale'}`));

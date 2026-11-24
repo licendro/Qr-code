@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Colis">
+<meta name="theme-color" content="#1c1a17">
+<title>Scan colis</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;800&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{color-scheme:light dark;
+--bg:light-dark(#d9b98a,#2a2119);--card:light-dark(#fffdf8,#3a2e24);--ink:light-dark(#1c1a17,#f6eee2);
+--mute:light-dark(#6d6155,#c3b39f);--line:light-dark(#e6dccd,#4e4033);--acc:#d7372b;--ok:#1f7a4a;--tape:light-dark(#c69a5d,#5a4633)}
+*{box-sizing:border-box;min-width:0}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 Inter,system-ui,sans-serif;overflow-x:clip;
+background-image:repeating-linear-gradient(90deg,transparent 0 22px,rgba(0,0,0,.025) 22px 23px)}
+.wrap{max-width:620px;margin:0 auto;padding:calc(18px + env(safe-area-inset-top)) max(4vw,14px) 120px}
+.top{display:flex;justify-content:space-between;align-items:center;gap:10px}
+h1{font:800 32px/1.05 Archivo,sans-serif;margin:4px 0 2px;letter-spacing:-.01em}
+.sub{color:var(--mute);margin:0 0 16px;font-size:15px}
+.link{background:none;border:0;color:var(--mute);font:500 14px Inter;text-decoration:underline;cursor:pointer;min-height:44px}
+.label{background:var(--card);border-radius:14px;padding:16px;box-shadow:0 1px 0 rgba(0,0,0,.08),0 10px 24px -14px rgba(0,0,0,.45)}
+.scan{display:flex;align-items:center;justify-content:center;gap:12px;width:100%;min-height:96px;border:0;border-radius:12px;background:var(--ink);color:var(--card);font:800 22px Archivo,sans-serif;cursor:pointer}
+.scan svg{width:38px;height:38px}
+button:focus-visible,input:focus-visible,a:focus-visible{outline:3px solid var(--acc);outline-offset:2px}
+.hint{font-size:13px;color:var(--mute);margin:8px 2px 0;text-align:center}
+.status{margin-top:12px;font-size:14px;min-height:20px;display:flex;gap:8px;align-items:center}
+.status.err{color:var(--acc)}.status.ok{color:var(--ok)}
+.spin{width:16px;height:16px;border:2px solid var(--line);border-top-color:var(--ink);border-radius:50%;animation:r .8s linear infinite;flex:none}
+@keyframes r{to{transform:rotate(1turn)}}
+.prev{display:none;margin-top:12px;max-height:160px;width:100%;object-fit:cover;border-radius:8px}
+form{display:grid;gap:10px;margin-top:14px}
+.row2{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:10px}
+label{font-size:13px;font-weight:600;color:var(--mute);display:grid;gap:4px}
+input{font:16px Inter,sans-serif;padding:11px 12px;border:1.5px solid var(--line);border-radius:10px;background:transparent;color:var(--ink);width:100%;min-height:46px}
+input.num{font-weight:600;font-variant-numeric:tabular-nums;letter-spacing:.02em}
+.actions{display:flex;gap:10px;margin-top:4px}
+.btn{min-height:48px;border-radius:10px;border:1.5px solid var(--ink);background:transparent;color:var(--ink);font:600 16px Inter,sans-serif;padding:0 16px;cursor:pointer}
+.btn.main{background:var(--acc);border-color:var(--acc);color:#fff;flex:1}
+.listhead{display:flex;align-items:baseline;justify-content:space-between;margin:28px 2px 10px}
+h2{font:800 22px Archivo,sans-serif;margin:0}
+.count{font:800 15px Archivo,sans-serif;background:var(--ink);color:var(--card);border-radius:999px;padding:2px 10px}
+.search{position:sticky;top:0;z-index:2;padding:8px 0;background:var(--bg)}
+.search input{background:var(--card);border-color:transparent}
+ul{list-style:none;margin:0;padding:0;display:grid;gap:10px}
+li.item{background:var(--card);border-radius:12px;padding:12px 12px 12px 16px;display:grid;grid-template-columns:minmax(0,1fr) auto;gap:4px 10px;align-items:center;border-left:6px solid var(--tape)}
+.nm{font-weight:600;font-size:17px}
+.pr{color:var(--mute);font-size:14px}
+.no{font-variant-numeric:tabular-nums;font-size:14px;overflow-wrap:anywhere}
+.dt{font-size:12.5px;color:var(--mute);white-space:nowrap}
+.val{grid-row:1/span 5;grid-column:2;min-height:48px;min-width:48px;border-radius:10px;border:1.5px solid var(--ok);background:transparent;color:var(--ok);font:600 14px Inter,sans-serif;padding:0 12px;cursor:pointer}
+.msg{grid-column:1/-1;display:flex;gap:8px;flex-wrap:wrap;margin-top:6px}
+.cp,.wa{min-height:44px;border-radius:10px;font:600 14px Inter,sans-serif;padding:0 14px;cursor:pointer;display:inline-flex;align-items:center;text-decoration:none}
+.cp{border:1.5px solid var(--ink);background:transparent;color:var(--ink)}
+.wa{background:#1f8f4e;color:#fff;border:0}
+.empty{text-align:center;color:var(--mute);padding:28px 10px;background:var(--card);border-radius:12px;opacity:.85}
+.toast{position:fixed;left:50%;bottom:calc(20px + env(safe-area-inset-bottom));transform:translateX(-50%);background:var(--ink);color:var(--card);border-radius:12px;padding:10px 10px 10px 16px;display:none;gap:12px;align-items:center;box-shadow:0 8px 24px rgba(0,0,0,.3);z-index:5;max-width:92vw}
+.toast button{background:transparent;border:1.5px solid var(--card);color:var(--card);border-radius:8px;min-height:40px;padding:0 12px;font:600 14px Inter;cursor:pointer}
+.sheet{position:fixed;inset:0;background:rgba(0,0,0,.45);display:none;align-items:flex-end;justify-content:center;z-index:6;padding:12px}
+.sheet>div{background:var(--card);border-radius:14px;padding:16px;width:100%;max-width:560px;display:grid;gap:10px}
+.sheet textarea{font:16px Inter,sans-serif;width:100%;border:1.5px solid var(--line);border-radius:10px;padding:10px;background:transparent;color:var(--ink)}
+.note{font-size:12.5px;color:var(--mute);margin-top:18px;text-align:center}
+/* alarme doublon */
+.alarm{position:fixed;inset:0;z-index:9;display:none;flex-direction:column;align-items:center;justify-content:center;gap:14px;padding:24px;text-align:center;color:#fff;background:#c00;cursor:pointer}
+.alarm.on{display:flex;animation:flash .25s steps(1) 8}
+@keyframes flash{50%{background:#ff2a2a}0%{background:#9a0000}}
+.alarm b{font:800 clamp(30px,9vw,52px)/1.05 Archivo,sans-serif}
+.alarm p{margin:0;font-size:17px;max-width:30ch}
+.alarm small{opacity:.85}
+/* connexion */
+.login{position:fixed;inset:0;z-index:8;background:var(--bg);display:none;align-items:center;justify-content:center;padding:20px}
+.login form{background:var(--card);padding:20px;border-radius:14px;width:100%;max-width:380px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top"><h1>Scan colis</h1><button class="link" id="logout" type="button">Déconnexion</button></div>
+  <p class="sub">Photo de l'étiquette → infos remplies → on enregistre.</p>
+
+  <section class="label">
+    <button class="scan" id="scanBtn" type="button">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 7V4h3M21 7V4h-3M3 17v3h3M21 17v3h-3"/><path d="M7 8v8M10 8v8M13 8v8M16 8v8"/></svg>
+      Scanner un colis
+    </button>
+    <input type="file" id="cam" accept="image/*" capture="environment" hidden>
+    <p class="hint">Prends toute l'étiquette, bien droite, nette et sans reflet.</p>
+    <div class="status" id="status"></div>
+    <img class="prev" id="prev" alt="Photo du colis">
+
+    <form id="f" autocomplete="off">
+      <label>Numéro du colis (FR…)<input id="num" class="num" required placeholder="Rempli au scan"></label>
+      <label>Produit<input id="prod" placeholder="Ex. colis Amazon, Vinted…"></label>
+      <div class="row2">
+        <label>Nom<input id="nom" autocapitalize="characters"></label>
+        <label>Prénom<input id="prenom" autocapitalize="words"></label>
+      </div>
+      <label>Téléphone (pour WhatsApp)<input id="tel" type="tel" inputmode="tel" placeholder="06 12 34 56 78"></label>
+      <label>Compagnie / autres infos<input id="infos" placeholder="Société, unité, bâtiment, mentions…"></label>
+      <div class="actions">
+        <button class="btn" type="reset" id="clr">Effacer</button>
+        <button class="btn main" type="submit">Enregistrer</button>
+      </div>
+    </form>
+  </section>
+
+  <div class="listhead"><h2>À reporter</h2><span class="count" id="count">0</span></div>
+  <div class="search"><input id="q" type="search" placeholder="Rechercher un nom, un numéro FR, une société…"></div>
+  <ul id="list"></ul>
+  <p class="note" id="store"></p>
+</div>
+
+<div class="toast" id="toast"><span id="tmsg"></span><button id="undo" type="button">Annuler</button></div>
+<div class="sheet" id="sheet"><div><b>Message à copier</b><textarea id="mtxt" readonly rows="7"></textarea><p class="hint" style="text-align:left">Appui long dans le texte → Tout sélectionner → Copier.</p><button class="btn" id="shClose" type="button">Fermer</button></div></div>
+<div class="alarm" id="alarm" role="alert"><b>PRODUIT DÉJÀ SCANNÉ</b><p id="amsg"></p><small>Touche l'écran pour fermer</small></div>
+<div class="login" id="login"><form id="lf"><h2 style="margin-bottom:12px">Scan colis</h2><label>Mot de passe<input id="pw" type="password" autocomplete="current-password" required></label><button class="btn main" type="submit" style="width:100%;margin-top:12px">Entrer</button><div class="status err" id="lerr"></div></form></div>
+
+<script>
+{
+const $=id=>document.getElementById(id);
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const numKey=n=>String(n||'').toUpperCase().replace(/[^A-Z0-9]/g,'');
+let items=[],ver=0,lecture='locale',SIGN='Julien MERCERON',lastDel=null,toastT=null,actx=null;
+
+const fmt=ts=>{const d=new Date(ts);return d.toLocaleDateString('fr-FR',{day:'2-digit',month:'2-digit',year:'numeric'})+' · '+d.toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'})};
+function status(msg,cls,spin){const s=$('status');s.className='status '+(cls||'');s.innerHTML=(spin?'<span class="spin"></span>':'')+'<span></span>';s.lastChild.textContent=msg||''}
+
+async function api(path,opt={}){
+  const r=await fetch(path,{credentials:'same-origin',headers:{'Content-Type':'application/json'},...opt,body:opt.body?JSON.stringify(opt.body):undefined});
+  if(r.status===401&&path!=='/api/login'){showLogin();throw {status:401}}
+  const j=await r.json().catch(()=>({}));
+  if(!r.ok)throw {status:r.status,...j};
+  return j;
+}
+
+/* ---------- son + alarme ---------- */
+function unlockAudio(){
+  try{actx=actx||new (window.AudioContext||window.webkitAudioContext)();if(actx.state==='suspended')actx.resume();
+    const o=actx.createOscillator(),g=actx.createGain();g.gain.value=0;o.connect(g).connect(actx.destination);o.start();o.stop(actx.currentTime+.01)}catch(e){}
+}
+function beepAlarm(){
+  if(!actx)return;
+  try{const t=actx.currentTime,g=actx.createGain();g.gain.value=1;g.connect(actx.destination);
+    for(let i=0;i<6;i++){const o=actx.createOscillator();o.type='square';o.frequency.value=i%2?520:1040;o.connect(g);o.start(t+i*.22);o.stop(t+i*.22+.2)}
+  }catch(e){}
+}
+function alarm(ex){
+  const qui=[ex.prenom,(ex.nom||'').toUpperCase()].filter(Boolean).join(' ')||'sans nom';
+  $('amsg').textContent=`${ex.numero} — ${qui}. Scanné le ${fmt(ex.ts)}${ex.validatedAt?', déjà validé le '+fmt(ex.validatedAt):', encore dans la liste'}.`;
+  const a=$('alarm');a.classList.remove('on');void a.offsetWidth;a.classList.add('on');
+  beepAlarm();try{navigator.vibrate&&navigator.vibrate([300,100,300,100,300])}catch(e){}
+  $('f').reset();$('prev').style.display='none';status('Produit déjà scanné.','err');
+}
+$('alarm').onclick=()=>$('alarm').classList.remove('on');
+const findDup=n=>{const k=numKey(n);return k?items.find(i=>i.numKey===k||numKey(i.numero)===k):null};
+
+/* ---------- liste ---------- */
+function msgOf(i){
+  const qui=[i.prenom,(i.nom||'').toUpperCase()].filter(Boolean).join(' ');
+  return `Bonjour${qui?' '+qui:''},\n\nC'est ${SIGN}. Votre colis${i.numero?' n° '+i.numero:''}${i.produit?' ('+i.produit+')':''} est disponible au vaguemestre, vous pouvez venir le récupérer.\n\nBonne journée.`;
+}
+function waNum(t){let d=String(t||'').replace(/[^0-9+]/g,'');if(!d)return'';if(d.startsWith('+'))d=d.slice(1);else if(d.startsWith('00'))d=d.slice(2);else if(d.length===10&&d[0]==='0')d='33'+d.slice(1);return /^[0-9]{8,15}$/.test(d)?d:''}
+function render(){
+  const q=$('q').value.trim().toLowerCase();
+  const open=items.filter(i=>!i.validatedAt);
+  const list=open.slice().sort((a,b)=>b.ts-a.ts).filter(i=>!q||[i.numero,i.produit,i.nom,i.prenom,i.infos,i.tel].join(' ').toLowerCase().includes(q));
+  $('count').textContent=open.length;
+  $('list').innerHTML=list.length?list.map(i=>`<li class="item">
+    <div class="nm">${esc((i.nom||'').toUpperCase())} ${esc(i.prenom)}${!i.nom&&!i.prenom?'<span style="color:var(--mute)">Sans nom</span>':''}</div>
+    <button class="val" data-id="${esc(i.id)}" type="button">Validé ✓</button>
+    <div class="pr">${esc(i.produit||'—')}</div>
+    ${i.infos?`<div class="pr">${esc(i.infos)}</div>`:''}
+    <div class="no">${esc(i.numero)}</div>
+    <div class="dt">${esc(fmt(i.ts))}</div>
+    <div class="msg"><button class="cp" data-id="${esc(i.id)}" type="button">Copier le message</button>${waNum(i.tel)?`<a class="wa" href="https://wa.me/${waNum(i.tel)}?text=${encodeURIComponent(msgOf(i))}" target="_blank" rel="noopener">WhatsApp</a>`:''}</div></li>`).join('')
+    :`<li class="empty">${open.length?'Aucun colis ne correspond.':'Aucun colis en attente. Scanne le premier !'}</li>`;
+}
+async function refresh(){
+  try{const j=await api('/api/colis?v='+ver);if(!j.same){items=j.items;ver=j.version;render()}$('store').textContent='Liste partagée sur tous tes appareils · '+items.length+' colis en base';}
+  catch(e){if(e.status!==401)$('store').textContent='Serveur injoignable, nouvel essai…'}
+}
+
+/* ---------- lecture d'étiquette ---------- */
+function loadImg(file){return new Promise((ok,ko)=>{const u=URL.createObjectURL(file),im=new Image();im.onload=()=>ok({im,u});im.onerror=ko;im.src=u})}
+function canvasOf(im,max){const sc=Math.min(1,max/Math.max(im.naturalWidth,im.naturalHeight));const c=document.createElement('canvas');c.width=Math.round(im.naturalWidth*sc);c.height=Math.round(im.naturalHeight*sc);c.getContext('2d').drawImage(im,0,0,c.width,c.height);return c}
+let tessP=null;
+const loadTess=()=>tessP||(tessP=new Promise((ok,ko)=>{const s=document.createElement('script');s.src='https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js';s.onload=ok;s.onerror=ko;document.head.appendChild(s)}));
+async function lireLocal(im){
+  await loadTess();
+  const {data}=await Tesseract.recognize(canvasOf(im,2000),'fra');
+  const T=(data.text||'').toUpperCase();
+  const fr=T.replace(/[^A-Z0-9\s]/g,' ').match(/FR\s?((?:[0-9A-Z]\s?){8,24})/);
+  const tel=T.match(/(?:\+33\s?|0)[1-9](?:[\s.\-]?\d{2}){4}/);
+  return {numero:fr?('FR'+fr[1]).replace(/\s+/g,''):'',tel:tel?tel[0]:'',nom:'',prenom:'',produit:'',infos:''};
+}
+async function lire(im){
+  if(lecture==='claude'){
+    const b64=canvasOf(im,2000).toDataURL('image/jpeg',.88);
+    try{return await api('/api/lire',{method:'POST',body:{image:b64}})}catch(e){if(e.status===401)throw e}
+  }
+  return lireLocal(im);
+}
+
+$('scanBtn').onclick=()=>{unlockAudio();$('cam').click()};
+$('cam').onchange=async e=>{
+  const file=e.target.files[0];e.target.value='';if(!file)return;
+  status('Lecture de l\'étiquette…','',true);
+  let im,u;try{({im,u}=await loadImg(file))}catch(err){status('Photo illisible, réessaie.','err');return}
+  $('prev').src=u;$('prev').style.display='block';
+  let lab;try{lab=await lire(im)}catch(err){status('Étiquette pas lue, reprends la photo ou tape les infos.','err');$('num').focus();return}
+  const num=String(lab.numero||'').replace(/\s+/g,'');
+  await refresh();
+  const dup=findDup(num);if(dup)return alarm(dup);
+  const set=(id,v)=>{v=String(v||'').trim();if(v)$(id).value=v};
+  set('num',num);set('prod',lab.produit);set('nom',lab.nom);set('prenom',lab.prenom);set('tel',lab.tel);set('infos',lab.infos);
+  const miss=[['num','numéro'],['nom','nom'],['prenom','prénom'],['prod','produit']].filter(([id])=>!$(id).value.trim());
+  status(miss.length?'Lu, sauf : '+miss.map(x=>x[1]).join(', ')+'. Complète puis enregistre.':'Tout est lu, vérifie puis enregistre.',miss.length>2?'err':'ok');
+  (miss.length?$(miss[0][0]):$('num')).focus();
+};
+$('num').addEventListener('change',()=>{const d=findDup($('num').value);if(d){unlockAudio();alarm(d)}});
+
+$('f').onsubmit=async e=>{
+  e.preventDefault();unlockAudio();
+  const numero=$('num').value.trim().replace(/\s+/g,'');if(!numero){$('num').focus();return}
+  const dup=findDup(numero);if(dup)return alarm(dup);
+  try{
+    const j=await api('/api/colis',{method:'POST',body:{numero,produit:$('prod').value,nom:$('nom').value,prenom:$('prenom').value,tel:$('tel').value,infos:$('infos').value}});
+    items.push(j.item);ver=j.version;render();
+    $('f').reset();$('prev').style.display='none';status('Enregistré le '+fmt(j.item.ts)+'.','ok');
+  }catch(err){if(err.status===409&&err.existing)alarm(err.existing);else if(err.status!==401)status('Échec de l\'enregistrement, réessaie.','err')}
+};
+$('clr').onclick=()=>{$('prev').style.display='none';status('')};
+$('q').oninput=render;
+$('shClose').onclick=()=>{$('sheet').style.display='none'};
+
+$('list').onclick=async e=>{
+  const cp=e.target.closest('.cp');
+  if(cp){const it=items.find(i=>i.id===cp.dataset.id);if(!it)return;const m=msgOf(it);
+    try{await navigator.clipboard.writeText(m);cp.textContent='Copié ✓';setTimeout(()=>cp.textContent='Copier le message',1800)}
+    catch(err){$('mtxt').value=m;$('sheet').style.display='flex';$('mtxt').focus();$('mtxt').select()}
+    return}
+  const b=e.target.closest('.val');if(!b)return;
+  b.disabled=true;
+  try{const j=await api(`/api/colis/${encodeURIComponent(b.dataset.id)}/valider`,{method:'POST'});
+    const k=items.findIndex(i=>i.id===j.item.id);if(k>=0)items[k]=j.item;ver=j.version;render();
+    lastDel=j.item;$('tmsg').textContent=`${(j.item.nom||'').toUpperCase()} ${j.item.prenom||''} validé`.trim();
+    $('toast').style.display='flex';clearTimeout(toastT);toastT=setTimeout(()=>{$('toast').style.display='none';lastDel=null},5000);
+  }catch(err){b.disabled=false}
+};
+$('undo').onclick=async()=>{if(!lastDel)return;const it=lastDel;lastDel=null;$('toast').style.display='none';
+  try{const j=await api(`/api/colis/${encodeURIComponent(it.id)}/restaurer`,{method:'POST'});const k=items.findIndex(i=>i.id===j.item.id);if(k>=0)items[k]=j.item;ver=j.version;render()}catch(e){}};
+
+/* ---------- connexion ---------- */
+function showLogin(){$('login').style.display='flex';setTimeout(()=>$('pw').focus(),50)}
+$('lf').onsubmit=async e=>{e.preventDefault();$('lerr').textContent='';
+  try{await api('/api/login',{method:'POST',body:{password:$('pw').value}});$('pw').value='';$('login').style.display='none';start()}
+  catch(err){$('lerr').textContent=err.error||'Erreur de connexion'}};
+$('logout').onclick=async()=>{try{await api('/api/logout',{method:'POST'})}catch(e){}items=[];ver=0;render();showLogin()};
+
+let poll=null;
+async function start(){
+  try{const me=await api('/api/me');lecture=me.lecture;SIGN=me.signature||SIGN}catch(e){return}
+  await refresh();clearInterval(poll);poll=setInterval(refresh,4000);
+}
+document.addEventListener('visibilitychange',()=>{if(!document.hidden)refresh()});
+render();start();
+}
+</script>
+</body>
+</html>

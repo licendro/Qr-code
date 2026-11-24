@@ -1,0 +1,9 @@
+{
+  "name": "qr-code",
+  "version": "1.0.0",
+  "description": "Scan colis — registre des colis du vaguemestre (scan d'étiquette, liste partagée, message WhatsApp)",
+  "main": "server.js",
+  "private": true,
+  "scripts": { "start": "node server.js" },
+  "engines": { "node": ">=20" }
+}
