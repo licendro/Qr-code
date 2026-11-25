@@ -88,16 +88,10 @@ const authed = req => sessions.has(cookies(req).sid);
 const isHttps = req => req.headers['x-forwarded-proto'] === 'https';
 
 // ---------- lecture d'étiquette par Claude (si clé API) ----------
-const PROMPT = `Photo d'une étiquette de colis (pas forcément droite). Lis-la attentivement et extrais :
-- numero : le numéro de suivi du colis ou du recommandé (souvent « FR… », mais aussi « 6A… », « 8R… », « XC… », « RL… », « CB… », « 1K… »…). Recopie-le exactement, sans espaces. S'il n'y en a aucun, prends le petit numéro imprimé à côté du nom du destinataire.
-- type : « R » si c'est un recommandé (mention « recommandé », « lettre recommandée », « R1/R2/R3 », avis de réception), sinon « C ».
-- cie : le numéro de compagnie du destinataire s'il est écrit (ex. « 7e Cie », « 7 CIE », « 7ème compagnie » → « 7 »), sinon vide.
-- nom : NOM de famille du destinataire (sans grade : ignore EG, GAV, M., Mme, SGT…)
-- prenom : prénom du destinataire
-- produit : ce que contient le colis ou à défaut l'expéditeur / la marque (ex. « Colis Amazon », « Vinted »), court.
-- tel : numéro de téléphone du destinataire s'il est écrit (chiffres seulement, sinon vide).
-- infos : les autres indications utiles près du destinataire : société / compagnie / unité, service, bâtiment, étage, chambre, mentions comme « fragile » ou « contre signature ». Sépare-les par « · ». Pas l'adresse postale complète, pas l'expéditeur, pas la compagnie (déjà dans cie).
-Réponds UNIQUEMENT avec ce JSON : {"numero":"","type":"C","cie":"","nom":"","prenom":"","produit":"","tel":"","infos":""} — chaîne vide si illisible, n'invente rien.`;
+const PROMPT = `Photo d'une étiquette de colis ou de recommandé. Relève TOUS les identifiants du colis qui y sont imprimés :
+numéros de suivi (ex. FR3268170312, GL692682820JB, 6A12345678901, RL123456789FR, 1Z…), numéros écrits sous les codes-barres, références d'envoi, numéros de colis/SSCC.
+N'inclus PAS : numéros de téléphone, codes postaux, dates, heures, poids, prix, numéros de rue, noms, adresses.
+Recopie chaque identifiant exactement, sans espaces. Réponds UNIQUEMENT avec ce JSON : {"codes":["...","..."]} (liste vide si rien).`;
 
 async function appelClaude(b64) {
   const ctl = new AbortController();
@@ -135,12 +129,8 @@ async function lireEtiquette(b64) {
   const m = txt.match(/\{[\s\S]*\}/);
   if (!m) throw new Error('réponse illisible');
   const o = JSON.parse(m[0]);
-  const out = {};
-  for (const k of ['numero', 'type', 'cie', 'nom', 'prenom', 'produit', 'tel', 'infos']) out[k] = String(o[k] ?? '').trim();
-  out.numero = out.numero.replace(/\s+/g, '').toUpperCase();
-  out.type = out.type.toUpperCase() === 'R' ? 'R' : 'C';
-  out.nom = out.nom.toUpperCase();
-  return out;
+  const codes = [...new Set((Array.isArray(o.codes) ? o.codes : []).map(c => String(c).replace(/\s+/g, '').toUpperCase()).filter(c => c.length >= 6 && c.length <= 40))];
+  return { codes };
 }
 
 // ---------- routes ----------
@@ -176,19 +166,23 @@ const server = http.createServer(async (req, res) => {
       }
       if (p === '/api/colis' && req.method === 'POST') {
         const b = await readBody(req, 50000);
-        const numero = clean(b.numero, 80).replace(/\s+/g, '');
-        if (!numero) return send(res, 400, { error: 'numéro manquant' });
-        const existing = colis.find(c => numKey(c.numero) === numKey(numero));
-        if (existing) return send(res, 409, { error: 'doublon', existing });
-        const it = {
-          id: crypto.randomBytes(8).toString('hex'), numero, numKey: numKey(numero),
-          produit: clean(b.produit), nom: clean(b.nom, 100), prenom: clean(b.prenom, 100),
-          tel: clean(b.tel, 30), infos: clean(b.infos, 500), obs: clean(b.obs, 500),
-          type: b.type === 'R' ? 'R' : 'C', cie: clean(b.cie, 30), vaguemestre: clean(b.vaguemestre, 60) || SIGNATURE,
-          ts: Date.now(), etat: 'recu', reporteAt: null, remisAt: null
-        };
+        let codes = (Array.isArray(b.codes) ? b.codes : [b.numero]).map(c => clean(c, 60).replace(/\s+/g, '').toUpperCase()).filter(c => numKey(c).length >= 4);
+        codes = [...new Set(codes)].slice(0, 20);
+        if (!codes.length) return send(res, 400, { error: 'aucun numéro' });
+        const keys = new Set(codes.map(numKey));
+        for (const c of colis) {
+          const hit = (c.codes || [c.numero]).find(x => keys.has(numKey(x)));
+          if (hit) return send(res, 409, { error: 'doublon', existing: c, code: hit });
+        }
+        const it = { id: crypto.randomBytes(8).toString('hex'), codes, numero: codes[0], numKey: numKey(codes[0]), ts: Date.now(), etat: 'recu', vaguemestre: SIGNATURE };
         colis.push(it); save();
         return send(res, 201, { item: it, version });
+      }
+      if (/^\/api\/colis\/[a-f0-9]+$/.test(p) && req.method === 'DELETE') {
+        const id = p.split('/').pop(); const n = colis.length;
+        colis = colis.filter(c => c.id !== id);
+        if (colis.length === n) return send(res, 404, { error: 'introuvable' });
+        save(); return send(res, 200, { ok: true, version });
       }
       let m = p.match(/^\/api\/colis\/([a-f0-9]+)\/etat$/);
       if (m && req.method === 'POST') {

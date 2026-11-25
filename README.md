@@ -1,14 +1,12 @@
 # Scan colis — registre du vaguemestre
 
-Petite app web pour enregistrer les colis :
+Petite app web pour savoir si un colis a déjà été scanné :
 
-- caméra en direct (en https) : l'app lit l'étiquette toute seule et enregistre le colis dès qu'elle a le numéro et le nom ; sinon tu prends une photo et l'app remplit le numéro FR, le nom, le prénom, le produit, le téléphone et les infos (société, unité…) ;
-- la date et l'heure s'enregistrent automatiquement ;
-- tu peux chercher dans la liste ;
-- **Validé ✓** retire le colis de la liste (il reste en base pour détecter les doublons) ;
-- un colis déjà scanné déclenche une **alarme** (bip fort, écran rouge qui clignote, « PRODUIT DÉJÀ SCANNÉ ») ;
-- un message WhatsApp tout prêt (« disponible au vaguemestre ») se copie, ou s'ouvre directement si le téléphone est connu ;
-- la liste est partagée entre tous tes appareils et protégée par un mot de passe.
+- tu prends l'étiquette en photo : l'app relève **tous les numéros** (codes-barres + numéros de suivi), sans les noms ;
+- si l'un de ces numéros a déjà été scanné : **alarme** (bip fort, écran rouge, « DÉJÀ SCANNÉ » avec la date) ;
+- sinon le colis est enregistré avec la date et l'heure ;
+- saisie manuelle possible, recherche, suppression d'un scan ;
+- liste partagée entre tous tes appareils, protégée par un mot de passe.
 
 Pas de dépendance : il suffit de Node.js 20 ou plus. Les données sont dans `data/` (jamais envoyées sur GitHub). Une sauvegarde est faite chaque jour dans `data/backups/`, et les 60 derniers jours sont gardés.
 
@@ -48,34 +46,6 @@ sudo ufw allow 3000/tcp
 ```
 
 Ensuite, ouvre `http://IP-DU-VPS:3000` sur ton iPhone. Dans Safari, touche **Partager → Sur l'écran d'accueil** pour l'avoir comme une app.
-
-## HTTPS (obligatoire pour le scan en direct avec la caméra)
-
-Sur iPhone, Safari n'ouvre la caméra en direct qu'en **https**. Il faut donc un sous-domaine, par exemple `colis.jdev-hub.fr`.
-
-1. Chez ton hébergeur DNS (IONOS) : ajoute un enregistrement **A**, nom `colis`, valeur `217.160.243.228`.
-2. Sur le VPS (nginx déjà installé) :
-
-```bash
-cat > /etc/nginx/sites-available/qr-code <<'NGINX'
-server {
-    listen 80;
-    server_name colis.jdev-hub.fr 217.160.243.228;
-    client_max_body_size 15m;
-    location / {
-        proxy_pass http://127.0.0.1:3010;
-        proxy_set_header Host $host;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_read_timeout 90s;
-    }
-}
-NGINX
-nginx -t && systemctl reload nginx
-apt install -y certbot python3-certbot-nginx
-certbot --nginx -d colis.jdev-hub.fr --redirect --agree-tos --register-unsafely-without-email
-```
-
-3. Ouvre `https://colis.jdev-hub.fr` : le bouton devient « Démarrer le scan ».
 
 ## Mettre à jour sans perdre les données
 
