@@ -101,6 +101,7 @@ select{font:16px Inter,sans-serif;padding:11px 12px;border:1.5px solid var(--lin
     <p class="hint">Prends toute l'étiquette, bien droite, nette et sans reflet.</p>
     <div class="status" id="status"></div>
     <img class="prev" id="prev" alt="Photo du colis">
+    <details id="rawBox" style="display:none;margin-top:8px;font-size:13px;color:var(--mute)"><summary>Texte lu sur l'étiquette</summary><pre id="raw" style="white-space:pre-wrap;font-size:12px"></pre></details>
 
     <form id="f" autocomplete="off">
       <div class="seg" role="group" aria-label="Type"><button type="button" data-t="C" aria-pressed="true">C · Colis</button><button type="button" data-t="R" aria-pressed="false">R · Recommandé</button></div>
@@ -230,9 +231,14 @@ function parseLabel(raw){
   // nom / prénom / compagnie
   const CIE=/(\d)\s*(?:E|ER|ERE|EME|RE|°)?\s*(?:C\s*I\s*E|COMPAGNIE|CMP)\b/i;
   const STOP=/\b(AV|AVENUE|RUE|BD|ECOLE|FRANCE|CHAUMONT|GENDARMERIE|RGT|REGIMENT|CEDEX|BP)\b/;
-  const takeNames=l=>{const toks=l.replace(CIE,' ').replace(/[^A-Za-zÀ-ÿ' -]/g,' ').split(/\s+/).filter(t=>t.length>1);
+  const GRADE=/^(EG|EGA|GAV|ESOG|ELEVE|SGT|MDL|MDC|ADJ|ADC|MAJ|LTN|SLT|CNE|CDT|LCL|COL|BRI|BCH|GND|M|MR|MME|MLLE|MLE)$/i;
+  const takeNames=l=>{const pre=l.split(/\d\s*(?:e|er|ere|ème|eme|re|°)?\s*(?:c\s*i\s*e|compagnie|cmp)\b/i)[0];
+    const toks=pre.replace(/[^A-Za-zÀ-ÿ' -]/g,' ').split(/\s+/).filter(t=>t.length>1&&!GRADE.test(t));
+    if(!toks.length)return;
     const up=toks.filter(t=>t===t.toUpperCase()&&/[A-Z]/.test(t)),lo=toks.filter(t=>t!==t.toUpperCase());
-    if(up.length){out.nom=up.join(' ');out.prenom=lo.join(' ')}};
+    if(up.length&&lo.length){out.nom=up.join(' ');out.prenom=lo.join(' ')}
+    else if(toks.length>1){out.prenom=toks[0];out.nom=toks.slice(1).join(' ').toUpperCase()}
+    else out.nom=toks[0].toUpperCase()};
   const cl=lines.find(l=>CIE.test(U(l)));
   if(cl){out.cie=U(cl).match(CIE)[1];takeNames(cl)}
   else{const nl=lines.find(l=>!/\d/.test(l)&&!STOP.test(U(l))&&/\b[A-ZÀ-Ý]{3,}\b/.test(l)&&/\b[A-ZÀ-Ý][a-zà-ÿ]{2,}\b/.test(l));if(nl)takeNames(nl)}
@@ -241,9 +247,10 @@ function parseLabel(raw){
   // recommandé / produit
   const all=U(lines.join(' '));
   if(/RECOMMANDE|\bR[123]\b|AVIS DE RECEPTION/.test(all))out.type='R';
-  const brands=[['AMAZON','Colis Amazon'],['VINTED','Vinted'],['COLISSIMO','Colissimo'],['CHRONOPOST','Chronopost'],['MONDIAL RELAY','Mondial Relay'],['SHEIN','Shein'],['ZALANDO','Zalando'],['CDISCOUNT','Cdiscount'],['TEMU','Temu'],['ALIEXPRESS','AliExpress'],['DPD','DPD'],['UPS','UPS'],['GLS','GLS'],['DHL','DHL']];
+  const brands=[['AMAZON','Colis Amazon'],['VINTED','Vinted'],['COLISSIMO','Colissimo'],['CHRONOPOST','Chronopost'],['MONDIAL RELAY','Mondial Relay'],['SHEIN','Shein'],['ZALANDO','Zalando'],['CDISCOUNT','Cdiscount'],['TEMU','Temu'],['ALIEXPRESS','AliExpress'],['DPD','DPD'],['UPS','UPS'],['GLS','GLS'],['DHL','DHL'],['SALOMON','Salomon'],['DECATHLON','Decathlon'],['NIKE','Nike'],['ADIDAS','Adidas']];
   const b=brands.find(([k])=>new RegExp('\\b'+k+'\\b').test(all));
-  if(b)out.produit=b[1];else if(/\bCYCLE\s*\d\b/.test(all)||/\b(DBF|ORY|LYS)\d\b/.test(all))out.produit='Colis Amazon';
+  const mail=lines.join(' ').match(/@([a-z0-9-]+)\.(?:com|fr|net|eu|de|it|es)/i);
+  if(b)out.produit=b[1];else if(mail&&!/^(gmail|hotmail|yahoo|outlook|orange|free|sfr|laposte|wanadoo|icloud)$/i.test(mail[1]))out.produit=mail[1].charAt(0).toUpperCase()+mail[1].slice(1);else if(/\bCYCLE\s*\d\b/.test(all)||/\b(DBF|ORY|LYS)\d\b/.test(all))out.produit='Colis Amazon';
   return out;
 }
 async function lireLocal(im){
@@ -252,7 +259,7 @@ async function lireLocal(im){
   for(let i=0;i<px.length;i+=4){let y=.299*px[i]+.587*px[i+1]+.114*px[i+2];y=Math.max(0,Math.min(255,(y-128)*1.5+128));px[i]=px[i+1]=px[i+2]=y}
   g.putImageData(d,0,0);
   const {data}=await Tesseract.recognize(c,'fra');
-  return parseLabel(data.text);
+  const r=parseLabel(data.text);r._raw=data.text;return r;
 }
 async function lire(im){
   if(lecture==='claude'){
@@ -265,10 +272,11 @@ async function lire(im){
 $('scanBtn').onclick=()=>{unlockAudio();$('cam').click()};
 $('cam').onchange=async e=>{
   const file=e.target.files[0];e.target.value='';if(!file)return;
-  status('Lecture de l\'étiquette…','',true);
+  status(lecture==='claude'?'Lecture de l\'étiquette…':'Lecture de l\'étiquette (10 à 20 s)…','',true);
   let im,u;try{({im,u}=await loadImg(file))}catch(err){status('Photo illisible, réessaie.','err');return}
   $('prev').src=u;$('prev').style.display='block';
   let lab;try{lab=await lire(im)}catch(err){status('Étiquette pas lue, reprends la photo ou tape les infos.','err');$('num').focus();return}
+  if(lab._raw!==undefined){$('raw').textContent=lab._raw.trim()||'(aucun texte reconnu)';$('rawBox').style.display='block'}else $('rawBox').style.display='none';
   const num=String(lab.numero||'').replace(/\s+/g,'');
   await refresh();
   const dup=findDup(num);if(dup)return alarm(dup);
