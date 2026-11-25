@@ -7,197 +7,441 @@
 <meta name="apple-mobile-web-app-title" content="Colis">
 <meta name="theme-color" content="#1c1a17">
 <title>Scan colis</title>
-<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@800&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;800&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
-:root{color-scheme:light dark;--bg:light-dark(#d9b98a,#2a2119);--card:light-dark(#fffdf8,#3a2e24);--ink:light-dark(#1c1a17,#f6eee2);
---mute:light-dark(#6d6155,#c3b39f);--line:light-dark(#e6dccd,#4e4033);--acc:#d7372b;--ok:#1f7a4a}
+:root{color-scheme:light dark;
+--bg:light-dark(#d9b98a,#2a2119);--card:light-dark(#fffdf8,#3a2e24);--ink:light-dark(#1c1a17,#f6eee2);
+--mute:light-dark(#6d6155,#c3b39f);--line:light-dark(#e6dccd,#4e4033);--acc:#d7372b;--ok:#1f7a4a;--tape:light-dark(#c69a5d,#5a4633)}
 *{box-sizing:border-box;min-width:0}
-body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 Inter,system-ui,sans-serif;overflow-x:clip}
-.wrap{max-width:620px;margin:0 auto;padding:calc(16px + env(safe-area-inset-top)) max(4vw,14px) 100px}
-.top{display:flex;justify-content:space-between;align-items:center}
-h1{font:800 32px/1.05 Archivo,sans-serif;margin:4px 0}
-h2{font:800 20px Archivo,sans-serif;margin:26px 2px 10px;display:flex;justify-content:space-between;align-items:baseline}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 Inter,system-ui,sans-serif;overflow-x:clip;
+background-image:repeating-linear-gradient(90deg,transparent 0 22px,rgba(0,0,0,.025) 22px 23px)}
+.wrap{max-width:620px;margin:0 auto;padding:calc(18px + env(safe-area-inset-top)) max(4vw,14px) 120px}
+.top{display:flex;justify-content:space-between;align-items:center;gap:10px}
+h1{font:800 32px/1.05 Archivo,sans-serif;margin:4px 0 2px;letter-spacing:-.01em}
+.sub{color:var(--mute);margin:0 0 16px;font-size:15px}
 .link{background:none;border:0;color:var(--mute);font:500 14px Inter;text-decoration:underline;cursor:pointer;min-height:44px}
-.card{background:var(--card);border-radius:14px;padding:16px;box-shadow:0 10px 24px -14px rgba(0,0,0,.45)}
-.scan{display:flex;align-items:center;justify-content:center;gap:12px;width:100%;min-height:120px;border:0;border-radius:12px;background:var(--ink);color:var(--card);font:800 24px Archivo,sans-serif;cursor:pointer}
-.scan svg{width:42px;height:42px}
+.label{background:var(--card);border-radius:14px;padding:16px;box-shadow:0 1px 0 rgba(0,0,0,.08),0 10px 24px -14px rgba(0,0,0,.45)}
+.scan{display:flex;align-items:center;justify-content:center;gap:12px;width:100%;min-height:96px;border:0;border-radius:12px;background:var(--ink);color:var(--card);font:800 22px Archivo,sans-serif;cursor:pointer}
+.scan svg{width:38px;height:38px}
+button:focus-visible,input:focus-visible,a:focus-visible{outline:3px solid var(--acc);outline-offset:2px}
 .hint{font-size:13px;color:var(--mute);margin:8px 2px 0;text-align:center}
-.res{margin-top:14px;border-radius:12px;padding:14px;display:none}
-.res.ok{display:block;background:#e3f4ea;color:#0f4a2b}.res.warn{display:block;background:#fff1d6;color:#6b4500}.res.busy{display:block;background:var(--line)}
-.res b{font:800 20px Archivo,sans-serif;display:block;margin-bottom:4px}
-.codes{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
-.code{font:600 14px ui-monospace,Menlo,monospace;background:rgba(0,0,0,.07);border-radius:6px;padding:3px 7px;overflow-wrap:anywhere}
-.spin{display:inline-block;width:16px;height:16px;border:2px solid var(--mute);border-top-color:var(--ink);border-radius:50%;animation:r .8s linear infinite;vertical-align:-3px;margin-right:8px}
+.status{margin-top:12px;font-size:14px;min-height:20px;display:flex;gap:8px;align-items:center}
+.status.err{color:var(--acc)}.status.ok{color:var(--ok)}
+.spin{width:16px;height:16px;border:2px solid var(--line);border-top-color:var(--ink);border-radius:50%;animation:r .8s linear infinite;flex:none}
 @keyframes r{to{transform:rotate(1turn)}}
-.manual{display:flex;gap:8px;margin-top:12px}
-input{font:16px Inter,sans-serif;padding:11px 12px;border:1.5px solid var(--line);border-radius:10px;background:var(--card);color:var(--ink);width:100%;min-height:46px}
-.btn{min-height:46px;border-radius:10px;border:0;background:var(--acc);color:#fff;font:600 16px Inter;padding:0 16px;cursor:pointer;flex:none}
-.count{font:800 14px Archivo;background:var(--ink);color:var(--card);border-radius:999px;padding:2px 10px}
-ul{list-style:none;margin:0;padding:0;display:grid;gap:8px}
-li.it{background:var(--card);border-radius:12px;padding:10px 10px 10px 14px;display:grid;grid-template-columns:minmax(0,1fr) auto;gap:2px 8px;align-items:center}
-.dt{font-size:13px;color:var(--mute)}
-.del{grid-row:1/span 2;grid-column:2;min-width:44px;min-height:44px;border-radius:10px;border:1.5px solid var(--line);background:transparent;color:var(--mute);font-size:18px;cursor:pointer}
-.empty{text-align:center;color:var(--mute);padding:24px;background:var(--card);border-radius:12px}
-.note{font-size:12.5px;color:var(--mute);margin-top:16px;text-align:center}
+.prev{display:none;margin-top:12px;max-height:160px;width:100%;object-fit:cover;border-radius:8px}
+form{display:grid;gap:10px;margin-top:14px}
+.row2{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:10px}
+label{font-size:13px;font-weight:600;color:var(--mute);display:grid;gap:4px}
+input{font:16px Inter,sans-serif;padding:11px 12px;border:1.5px solid var(--line);border-radius:10px;background:transparent;color:var(--ink);width:100%;min-height:46px}
+input.num{font-weight:600;font-variant-numeric:tabular-nums;letter-spacing:.02em}
+.actions{display:flex;gap:10px;margin-top:4px}
+.btn{min-height:48px;border-radius:10px;border:1.5px solid var(--ink);background:transparent;color:var(--ink);font:600 16px Inter,sans-serif;padding:0 16px;cursor:pointer}
+.btn.main{background:var(--acc);border-color:var(--acc);color:#fff;flex:1}
+.listhead{display:flex;align-items:baseline;justify-content:space-between;margin:28px 2px 10px}
+h2{font:800 22px Archivo,sans-serif;margin:0}
+.count{font:800 15px Archivo,sans-serif;background:var(--ink);color:var(--card);border-radius:999px;padding:2px 10px}
+.search{position:sticky;top:0;z-index:2;padding:8px 0;background:var(--bg)}
+.search input{background:var(--card);border-color:transparent}
+ul{list-style:none;margin:0;padding:0;display:grid;gap:10px}
+li.item{background:var(--card);border-radius:12px;padding:12px 12px 12px 16px;display:grid;grid-template-columns:minmax(0,1fr) auto;gap:4px 10px;align-items:center;border-left:6px solid var(--tape)}
+.nm{font-weight:600;font-size:17px}
+.pr{color:var(--mute);font-size:14px}
+.no{font-variant-numeric:tabular-nums;font-size:14px;overflow-wrap:anywhere}
+.dt{font-size:12.5px;color:var(--mute)}
+li.item>*:not(.val){grid-column:1}
+.val{grid-row:1/span 4;align-self:start;grid-column:2;min-height:48px;min-width:48px;border-radius:10px;border:1.5px solid var(--ok);background:transparent;color:var(--ok);font:600 14px Inter,sans-serif;padding:0 12px;cursor:pointer}
+.msg{grid-column:1/-1!important;display:flex;gap:8px;flex-wrap:wrap;margin-top:6px}
+.cp,.wa{min-height:44px;border-radius:10px;font:600 14px Inter,sans-serif;padding:0 14px;cursor:pointer;display:inline-flex;align-items:center;text-decoration:none}
+.cp{border:1.5px solid var(--ink);background:transparent;color:var(--ink)}
+.wa{background:#1f8f4e;color:#fff;border:0}
+.seg{display:grid;grid-template-columns:1fr 1fr;gap:6px;background:var(--line);padding:4px;border-radius:12px}
+.seg button{min-height:44px;border:0;border-radius:9px;background:transparent;color:var(--ink);font:600 15px Inter;cursor:pointer}
+.seg button[aria-pressed=true]{background:var(--ink);color:var(--card)}
+select{font:16px Inter,sans-serif;padding:11px 12px;border:1.5px solid var(--line);border-radius:10px;background:transparent;color:var(--ink);width:100%;min-height:46px}
+.vg{font-size:13px;color:var(--mute)}
+.tabs{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;margin:28px 0 6px}
+.tabs button{min-height:48px;border-radius:10px;border:1.5px solid var(--ink);background:transparent;color:var(--ink);font:600 14px Inter;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px}
+.tabs button[aria-selected=true]{background:var(--ink);color:var(--card)}
+.tabs b{font:800 13px Archivo;background:var(--acc);color:#fff;border-radius:999px;padding:0 7px;min-width:22px}
+.bdg{display:inline-block;font:800 12px Archivo;border-radius:6px;padding:1px 6px;margin-right:6px;vertical-align:2px;background:var(--tape);color:#fff}
+.bdg.r{background:#2457c5}
+.ob{font-size:14px;font-style:italic}
+.live{position:relative;border-radius:12px;overflow:hidden;background:#000;aspect-ratio:3/4;max-height:62vh;margin:0 auto}
+.live video{width:100%;height:100%;object-fit:cover;display:block}
+.live .frame{position:absolute;inset:7%;border:3px solid rgba(255,255,255,.75);border-radius:14px;transition:border-color .2s}
+.live.busy .frame{border-color:#ffd23f}.live.ok .frame{border-color:#3ddc84;border-width:6px}
+.chip{position:absolute;left:50%;bottom:14px;transform:translateX(-50%);background:rgba(0,0,0,.72);color:#fff;padding:7px 14px;border-radius:999px;font-size:14px;width:max-content;max-width:90%;text-align:center}
+.liveBar{display:flex;gap:10px;margin-top:10px}.liveBar .btn{flex:1}
+.empty{text-align:center;color:var(--mute);padding:28px 10px;background:var(--card);border-radius:12px;opacity:.85}
+.toast{position:fixed;left:50%;bottom:calc(20px + env(safe-area-inset-bottom));transform:translateX(-50%);background:var(--ink);color:var(--card);border-radius:12px;padding:10px 10px 10px 16px;display:none;gap:12px;align-items:center;box-shadow:0 8px 24px rgba(0,0,0,.3);z-index:5;max-width:92vw}
+.toast button{background:transparent;border:1.5px solid var(--card);color:var(--card);border-radius:8px;min-height:40px;padding:0 12px;font:600 14px Inter;cursor:pointer}
+.sheet{position:fixed;inset:0;background:rgba(0,0,0,.45);display:none;align-items:flex-end;justify-content:center;z-index:6;padding:12px}
+.sheet>div{background:var(--card);border-radius:14px;padding:16px;width:100%;max-width:560px;display:grid;gap:10px}
+.sheet textarea{font:16px Inter,sans-serif;width:100%;border:1.5px solid var(--line);border-radius:10px;padding:10px;background:transparent;color:var(--ink)}
+.note{font-size:12.5px;color:var(--mute);margin-top:18px;text-align:center}
+/* alarme doublon */
 .alarm{position:fixed;inset:0;z-index:9;display:none;flex-direction:column;align-items:center;justify-content:center;gap:14px;padding:24px;text-align:center;color:#fff;background:#c00;cursor:pointer}
 .alarm.on{display:flex;animation:flash .25s steps(1) 8}
-@keyframes flash{0%{background:#9a0000}50%{background:#ff2a2a}}
+@keyframes flash{50%{background:#ff2a2a}0%{background:#9a0000}}
 .alarm b{font:800 clamp(30px,9vw,52px)/1.05 Archivo,sans-serif}
-.alarm p{margin:0;font-size:17px;max-width:32ch}
+.alarm p{margin:0;font-size:17px;max-width:30ch}
+.alarm small{opacity:.85}
+/* connexion */
 .login{position:fixed;inset:0;z-index:8;background:var(--bg);display:none;align-items:center;justify-content:center;padding:20px}
-.login form{background:var(--card);padding:20px;border-radius:14px;width:100%;max-width:380px;display:grid;gap:10px}
-.err{color:var(--acc);font-size:14px;min-height:20px}
-button:focus-visible,input:focus-visible{outline:3px solid var(--acc);outline-offset:2px}
+.login form{background:var(--card);padding:20px;border-radius:14px;width:100%;max-width:380px}
 </style>
 </head>
 <body>
 <div class="wrap">
   <div class="top"><h1>Scan colis</h1><button class="link" id="logout" type="button">Déconnexion</button></div>
+  <p class="sub">Photo de l'étiquette → infos remplies → reporté au registre → remis.</p>
 
-  <section class="card">
-    <button class="scan" id="scanBtn" type="button">
+  <section class="label">
+    <button class="scan" id="scanBtn" type="button" style="display:flex">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 7V4h3M21 7V4h-3M3 17v3h3M21 17v3h-3"/><path d="M7 8v8M10 8v8M13 8v8M16 8v8"/></svg>
-      Scanner un colis
+      <span id="scanTxt">Scanner un colis</span>
     </button>
     <input type="file" id="cam" accept="image/*" capture="environment" hidden>
-    <p class="hint">Photo de l'étiquette entière, nette, codes-barres bien visibles.</p>
-    <div class="res" id="res"></div>
-    <form class="manual" id="mf" autocomplete="off"><input id="mnum" placeholder="Ou tape un numéro à la main" autocapitalize="characters"><button class="btn" type="submit">OK</button></form>
+    <div class="live" id="live" hidden><video id="vid" playsinline muted autoplay></video><div class="frame"></div><div class="chip" id="chip"></div></div>
+    <div class="liveBar" id="liveBar" hidden><button class="btn" id="readNow" type="button">Lire maintenant</button><button class="btn" id="stopLive" type="button">Arrêter</button></div>
+    <p class="hint" id="hint">Prends toute l'étiquette, bien droite, nette et sans reflet.</p>
+    <div class="status" id="status"></div>
+    <img class="prev" id="prev" alt="Photo du colis">
+    <details id="rawBox" style="display:none;margin-top:8px;font-size:13px;color:var(--mute)"><summary>Texte lu sur l'étiquette</summary><pre id="raw" style="white-space:pre-wrap;font-size:12px"></pre></details>
+
+    <form id="f" autocomplete="off">
+      <div class="seg" role="group" aria-label="Type"><button type="button" data-t="C" aria-pressed="true">C · Colis</button><button type="button" data-t="R" aria-pressed="false">R · Recommandé</button></div>
+      <label>Numéro du colis / recommandé<input id="num" class="num" required placeholder="Rempli au scan"></label>
+      <label>Produit<input id="prod" placeholder="Ex. colis Amazon, Vinted…"></label>
+      <div class="row2">
+        <label>Nom<input id="nom" autocapitalize="characters"></label>
+        <label>Prénom<input id="prenom" autocapitalize="words"></label>
+      </div>
+      <label>Compagnie<select id="cie"><option value="">—</option><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option><option>6</option><option>7</option><option value="DAF">DAF</option><option value="Cadre">Cadre</option><option value="Autre">Autre</option></select></label>
+      <label>Téléphone (pour WhatsApp)<input id="tel" type="tel" inputmode="tel" placeholder="06 12 34 56 78"></label>
+      <label>Autres infos (unité, bâtiment, mentions)<input id="infos" placeholder="Société, bâtiment, fragile…"></label>
+      <label>Observations<input id="obs" placeholder="Abîmé, volumineux, armoire forte…"></label>
+      <div class="vg" id="vg"></div>
+      <div class="actions">
+        <button class="btn" type="reset" id="clr">Effacer</button>
+        <button class="btn main" type="submit">Enregistrer</button>
+      </div>
+    </form>
   </section>
 
-  <h2>Colis scannés <span class="count" id="count">0</span></h2>
-  <input id="q" type="search" placeholder="Chercher un numéro…" style="margin-bottom:10px">
+  <div class="tabs" role="tablist"><button role="tab" data-tab="recu" aria-selected="true">À reporter <b id="n-recu">0</b></button><button role="tab" data-tab="reporte" aria-selected="false">À remettre <b id="n-reporte">0</b></button><button role="tab" data-tab="remis" aria-selected="false">Remis</button></div>
+  <div class="search"><input id="q" type="search" placeholder="Rechercher nom, numéro, Cie…"></div>
   <ul id="list"></ul>
   <p class="note" id="store"></p>
   <p class="note"><button class="link" id="testAlarm" type="button">Tester l'alarme</button></p>
 </div>
 
-<div class="alarm" id="alarm" role="alert"><b>DÉJÀ SCANNÉ</b><p id="amsg"></p><small>Touche l'écran pour fermer</small></div>
-<div class="login" id="login"><form id="lf"><h2 style="margin:0">Scan colis</h2><input id="pw" type="password" placeholder="Mot de passe" autocomplete="current-password" required><button class="btn" type="submit">Entrer</button><div class="err" id="lerr"></div></form></div>
+<div class="toast" id="toast"><span id="tmsg"></span><button id="undo" type="button">Annuler</button></div>
+<div class="sheet" id="sheet"><div><b>Message à copier</b><textarea id="mtxt" readonly rows="7"></textarea><p class="hint" style="text-align:left">Appui long dans le texte → Tout sélectionner → Copier.</p><button class="btn" id="shClose" type="button">Fermer</button></div></div>
+<div class="alarm" id="alarm" role="alert"><b>PRODUIT DÉJÀ SCANNÉ</b><p id="amsg"></p><small>Touche l'écran pour fermer</small></div>
+<div class="login" id="login"><form id="lf"><h2 style="margin-bottom:12px">Scan colis</h2><label>Mot de passe<input id="pw" type="password" autocomplete="current-password" required></label><button class="btn main" type="submit" style="width:100%;margin-top:12px">Entrer</button><div class="status err" id="lerr"></div></form></div>
 
 <script>
 {
 const $=id=>document.getElementById(id);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const numKey=n=>String(n||'').toUpperCase().replace(/[^A-Z0-9]/g,'').replace(/^FR/,'');
-const fmt=ts=>{const d=new Date(ts);return d.toLocaleDateString('fr-FR',{day:'2-digit',month:'2-digit'})+' à '+d.toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'})};
-let items=[],ver=0,lecture='locale';
+let tab='recu',ctype='C',items=[],ver=0,lecture='locale',SIGN='Julien MERCERON',lastDel=null,toastT=null,actx=null;
+
+const fmt=ts=>{const d=new Date(ts);return d.toLocaleDateString('fr-FR',{day:'2-digit',month:'2-digit',year:'numeric'})+' · '+d.toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'})};
+function status(msg,cls,spin){const s=$('status');s.className='status '+(cls||'');s.innerHTML=(spin?'<span class="spin"></span>':'')+'<span></span>';s.lastChild.textContent=msg||''}
 
 async function api(path,opt={}){
   const r=await fetch(path,{credentials:'same-origin',headers:{'Content-Type':'application/json'},...opt,body:opt.body?JSON.stringify(opt.body):undefined});
   if(r.status===401&&path!=='/api/login'){showLogin();throw {status:401}}
-  const j=await r.json().catch(()=>({}));if(!r.ok)throw {status:r.status,...j};return j;
+  const j=await r.json().catch(()=>({}));
+  if(!r.ok)throw {status:r.status,...j};
+  return j;
 }
 
-/* ---- sons ---- */
-function wav(kind){const sr=22050,dur=kind==='ok'?.45:1.4,n=Math.floor(sr*dur),buf=new ArrayBuffer(44+n),v=new DataView(buf),w=(o,t)=>{for(let i=0;i<t.length;i++)v.setUint8(o+i,t.charCodeAt(i))};
-  w(0,'RIFF');v.setUint32(4,36+n,true);w(8,'WAVEfmt ');v.setUint32(16,16,true);v.setUint16(20,1,true);v.setUint16(22,1,true);v.setUint32(24,sr,true);v.setUint32(28,sr,true);v.setUint16(32,1,true);v.setUint16(34,8,true);w(36,'data');v.setUint32(40,n,true);
-  for(let i=0;i<n;i++){const t=i/sr;let s=128;if(kind==='ok'){const f=t<.15?1320:1760;if(t<.13||(t>.18&&t<.42))s=128+Math.round(90*Math.sin(2*Math.PI*f*t))}else{const f=Math.floor(t/.2)%2?520:1040;if((t%.2)<.17)s=Math.sin(2*Math.PI*f*t)>=0?250:6}v.setUint8(44+i,s)}
-  return URL.createObjectURL(new Blob([buf],{type:'audio/wav'}))}
-const sA=new Audio(wav('alarm')),sO=new Audio(wav('ok'));const unl=new Set();
-function unlock(){for(const a of [sA,sO]){if(unl.has(a))continue;try{a.muted=true;const p=a.play();const d=()=>{if(!a._b){a.pause();a.currentTime=0}a.muted=false;unl.add(a)};p&&p.then?p.then(d).catch(()=>{a.muted=false}):d()}catch(e){a.muted=false}}}
-function play(a,ms){a._b=true;unl.add(a);setTimeout(()=>a._b=false,ms);try{a.muted=false;a.volume=1;a.currentTime=0;const p=a.play();p&&p.catch&&p.catch(()=>{})}catch(e){}}
-function alarm(ex,code){
-  $('amsg').textContent=`Le numéro ${code||ex.numero} a déjà été scanné le ${fmt(ex.ts)}.`;
-  const a=$('alarm');a.classList.remove('on');void a.offsetWidth;a.classList.add('on');play(sA,1600);
-  res('warn','Déjà scanné',`Scanné le ${fmt(ex.ts)}`,ex.codes||[ex.numero]);
+/* ---------- son + alarme ---------- */
+function makeWav(kind){
+  const sr=22050,dur=kind==='ok'?.45:1.4,n=Math.floor(sr*dur),buf=new ArrayBuffer(44+n),v=new DataView(buf);
+  const w=(o,t)=>{for(let i=0;i<t.length;i++)v.setUint8(o+i,t.charCodeAt(i))};
+  w(0,'RIFF');v.setUint32(4,36+n,true);w(8,'WAVEfmt ');v.setUint32(16,16,true);v.setUint16(20,1,true);v.setUint16(22,1,true);
+  v.setUint32(24,sr,true);v.setUint32(28,sr,true);v.setUint16(32,1,true);v.setUint16(34,8,true);w(36,'data');v.setUint32(40,n,true);
+  for(let i=0;i<n;i++){const t=i/sr;let s=128;
+    if(kind==='ok'){const f=t<.15?1320:1760,on=t<.13||(t>.18&&t<.42);if(on)s=128+Math.round(90*Math.sin(2*Math.PI*f*t))}
+    else{const seg=Math.floor(t/.2),f=seg%2?520:1040,on=(t%.2)<.17;if(on)s=Math.sin(2*Math.PI*f*t)>=0?250:6}
+    v.setUint8(44+i,s)}
+  return URL.createObjectURL(new Blob([buf],{type:'audio/wav'}));
 }
+const snd=new Audio(makeWav('alarm')),sndOk=new Audio(makeWav('ok'));snd.preload=sndOk.preload='auto';
+const unlocked=new Set();
+function unlockOne(a){if(unlocked.has(a))return;try{a.muted=true;const p=a.play();const done=()=>{if(!a._busy){a.pause();a.currentTime=0}a.muted=false;unlocked.add(a)};if(p&&p.then)p.then(done).catch(()=>{a.muted=false});else done()}catch(e){a.muted=false}}
+function unlockAudio(){unlockOne(snd);unlockOne(sndOk)}
+function play(a,ms){a._busy=true;unlocked.add(a);setTimeout(()=>a._busy=false,ms);try{a.muted=false;a.volume=1;a.currentTime=0;const p=a.play();if(p&&p.catch)p.catch(()=>{})}catch(e){}}
+const beepAlarm=()=>play(snd,1600),beepOk=()=>play(sndOk,600);
+function alarm(ex,test,code){
+  const qui=[ex.prenom,(ex.nom||'').toUpperCase()].filter(Boolean).join(' ')||'sans nom';
+  $('amsg').textContent=`${code||ex.numero} — ${qui}. Scanné le ${fmt(ex.ts)}${ex.remisAt?', remis le '+fmt(ex.remisAt):ex.reporteAt?', reporté le '+fmt(ex.reporteAt)+', pas encore remis':', pas encore reporté'}.`;
+  const a=$('alarm');a.classList.remove('on');void a.offsetWidth;a.classList.add('on');
+  beepAlarm();try{navigator.vibrate&&navigator.vibrate([300,100,300,100,300])}catch(e){}
+  if(test)return;
+  $('f').reset();$('prev').style.display='none';status('Produit déjà scanné.','err');
+}
+$('testAlarm').onclick=()=>alarm({numero:'FRTEST',nom:'Test',prenom:'',ts:Date.now()},true);
 $('alarm').onclick=()=>$('alarm').classList.remove('on');
-$('testAlarm').onclick=()=>{unlock();alarm({numero:'FRTEST',ts:Date.now()},'FRTEST')};
-function findDup(codes){const ks=new Set(codes.map(numKey).filter(Boolean));for(const it of items){const hit=(it.codes||[it.numero]).find(c=>ks.has(numKey(c)));if(hit)return {it,hit}}return null}
+const keysOf=c=>{const k=numKey(c),o=[k],m=k.match(/^([A-Z]{2}\d{9})[A-Z]{2}$/);if(m)o.push(m[1]);return o.filter(x=>x.length>=4)};
+const memeColis=(a,b)=>{for(const x of keysOf(a))for(const y of keysOf(b)){if(x===y)return true;if(x.length>=10&&y.length>=10&&(x.includes(y)||y.includes(x)))return true}return false};
+const codesOf=i=>(i.codes&&i.codes.length?i.codes:[i.numero]).filter(Boolean);
+let curCodes=[];
+function findDupCodes(list){for(const it of items)for(const x of codesOf(it))if(list.some(y=>memeColis(x,y)))return {it,code:x};return null}
+const findDup=n=>{const d=findDupCodes([n].filter(Boolean));return d?d.it:null};
 
-/* ---- affichage ---- */
-function res(kind,title,txt,codes){const r=$('res');r.className='res '+kind;
-  r.innerHTML=(kind==='busy'?'<span class="spin"></span>':'')+'<b></b><div class="t"></div>'+(codes&&codes.length?'<div class="codes">'+codes.map(c=>`<span class="code">${esc(c)}</span>`).join('')+'</div>':'');
-  r.querySelector('b').textContent=title;r.querySelector('.t').textContent=txt||''}
-function render(){
-  const q=numKey($('q').value);
-  const list=items.slice().sort((a,b)=>b.ts-a.ts).filter(i=>!q||(i.codes||[i.numero]).some(c=>numKey(c).includes(q)));
-  $('count').textContent=items.length;
-  $('list').innerHTML=list.length?list.slice(0,300).map(i=>`<li class="it"><div class="codes">${(i.codes||[i.numero]).map(c=>`<span class="code">${esc(c)}</span>`).join('')}</div><button class="del" data-id="${esc(i.id)}" type="button" aria-label="Supprimer">✕</button><div class="dt">${esc(fmt(i.ts))}</div></li>`).join('')
-    :`<li class="empty">${q?'Aucun colis avec ce numéro.':'Aucun colis scanné.'}</li>`;
+/* ---------- liste ---------- */
+function msgOf(i){
+  const qui=[i.prenom,(i.nom||'').toUpperCase()].filter(Boolean).join(' ');
+  return `Bonjour${qui?' '+qui:''},\n\nC'est ${SIGN}. Votre colis${i.numero?' n° '+i.numero:''}${i.produit?' ('+i.produit+')':''} est disponible au vaguemestre, vous pouvez venir le récupérer.\n\nBonne journée.`;
 }
-async function refresh(){try{const j=await api('/api/colis?v='+ver);if(!j.same){items=j.items;ver=j.version;render()}$('store').textContent='Liste partagée sur tous tes appareils'}catch(e){if(e.status!==401)$('store').textContent='Serveur injoignable, nouvel essai…'}}
+function waNum(t){let d=String(t||'').replace(/[^0-9+]/g,'');if(!d)return'';if(d.startsWith('+'))d=d.slice(1);else if(d.startsWith('00'))d=d.slice(2);else if(d.length===10&&d[0]==='0')d='33'+d.slice(1);return /^[0-9]{8,15}$/.test(d)?d:''}
+function render(){
+  const q=$('q').value.trim().toLowerCase();
+  const n={recu:0,reporte:0,remis:0};items.forEach(i=>n[i.etat||'recu']++);
+  $('n-recu').textContent=n.recu;$('n-reporte').textContent=n.reporte;
+  let list=items.filter(i=>(i.etat||'recu')===tab).filter(i=>!q||[...codesOf(i),i.produit,i.nom,i.prenom,i.infos,i.tel,i.obs,cieTxt(i.cie)].join(' ').toLowerCase().includes(q));
+  list.sort((a,b)=>tab==='remis'?(b.remisAt||0)-(a.remisAt||0):b.ts-a.ts);
+  if(tab==='remis')list=list.slice(0,100);
+  const act={recu:['Reporté ✓','reporte'],reporte:['Remis ✓','remis']}[tab];
+  const vide={recu:'Rien à reporter. Scanne un colis !',reporte:'Aucun colis en attente de remise.',remis:'Aucun colis remis pour l\'instant.'}[tab];
+  $('list').innerHTML=list.length?list.map(i=>`<li class="item">
+    <div class="nm"><span class="bdg ${i.type==='R'?'r':''}">${i.type==='R'?'R':'C'}</span>${esc((i.nom||'').toUpperCase())} ${esc(i.prenom)}${!i.nom&&!i.prenom?'<span style="color:var(--mute)">Sans nom</span>':''}${i.cie?` <span class="pr">· ${esc(cieTxt(i.cie))}</span>`:''}</div>
+    ${act?`<button class="val" data-id="${esc(i.id)}" data-to="${act[1]}" type="button">${act[0]}</button>`:''}
+    <div class="pr">${esc(i.produit||'—')}</div>
+    ${i.infos?`<div class="pr">${esc(i.infos)}</div>`:''}
+    ${i.obs?`<div class="ob">${esc(i.obs)}</div>`:''}
+    <div class="no">${esc(i.numero)}</div>
+    <div class="dt">Reçu ${esc(fmt(i.ts))}${i.vaguemestre?' · '+esc(i.vaguemestre):''}</div>
+    ${i.reporteAt?`<div class="dt">Reporté ${esc(fmt(i.reporteAt))}</div>`:''}
+    ${i.remisAt?`<div class="dt">Remis ${esc(fmt(i.remisAt))}</div>`:''}
+    ${tab!=='remis'?`<div class="msg"><button class="cp" data-id="${esc(i.id)}" type="button">Copier le message</button>${waNum(i.tel)?`<a class="wa" href="https://wa.me/${waNum(i.tel)}?text=${encodeURIComponent(msgOf(i))}" target="_blank" rel="noopener">WhatsApp</a>`:''}</div>`:''}</li>`).join('')
+    :`<li class="empty">${q?'Aucun colis ne correspond.':vide}</li>`;
+}
+async function refresh(){
+  try{const j=await api('/api/colis?v='+ver);if(!j.same){items=j.items;ver=j.version;render()}$('store').textContent='Liste partagée sur tous tes appareils · '+items.length+' colis en base';}
+  catch(e){if(e.status!==401)$('store').textContent='Serveur injoignable, nouvel essai…'}
+}
 
-/* ---- lecture des numéros ---- */
-const loadScript=src=>new Promise((ok,ko)=>{const s=document.createElement('script');s.src=src;s.onload=ok;s.onerror=ko;document.head.appendChild(s)});
-let zxP=null,tsP=null;
-const loadZX=()=>zxP||(zxP=loadScript('https://unpkg.com/@zxing/library@0.21.3/umd/index.min.js'));
-const loadTS=()=>tsP||(tsP=loadScript('https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js'));
-function loadImg(file){return new Promise((ok,ko)=>{const u=URL.createObjectURL(file),im=new Image();im.onload=()=>ok(im);im.onerror=ko;im.src=u})}
-function canvasOf(im,max){const sc=Math.min(1,max/Math.max(im.naturalWidth,im.naturalHeight)),c=document.createElement('canvas');c.width=Math.round(im.naturalWidth*sc);c.height=Math.round(im.naturalHeight*sc);c.getContext('2d').drawImage(im,0,0,c.width,c.height);return c}
+/* ---------- lecture d'étiquette ---------- */
+function loadImg(file){return new Promise((ok,ko)=>{const u=URL.createObjectURL(file),im=new Image();im.onload=()=>ok({im,u});im.onerror=ko;im.src=u})}
+function canvasOf(im,max){const W=im.naturalWidth||im.videoWidth||im.width,H=im.naturalHeight||im.videoHeight||im.height;const sc=Math.min(1,max/Math.max(W,H));const c=document.createElement('canvas');c.width=Math.round(W*sc);c.height=Math.round(H*sc);c.getContext('2d').drawImage(im,0,0,c.width,c.height);return c}
+let tessP=null,zxP=null;
+const loadZX=()=>zxP||(zxP=new Promise((ok,ko)=>{const s=document.createElement('script');s.src='https://unpkg.com/@zxing/library@0.21.3/umd/index.min.js';s.onload=ok;s.onerror=ko;document.head.appendChild(s)}));
 const cleanCode=c=>String(c||'').toUpperCase().replace(/^%|^\(\d\d\)/,'').replace(/[^A-Z0-9]/g,'');
-const isPhone=c=>/^(33|0)[1-9]\d{8}$/.test(c);
-const keep=c=>c.length>=8&&c.length<=40&&(c.match(/\d/g)||[]).length>=6&&!isPhone(c);
-
 async function codesBarres(im){
   await loadZX();const Z=window.ZXing,found=new Set();
   const hints=new Map();hints.set(Z.DecodeHintType.TRY_HARDER,true);const rd=new Z.MultiFormatReader();rd.setHints(hints);
-  for(const max of [1600,2400]){
-    const c=canvasOf(im,max),W=c.width,H=c.height,d=c.getContext('2d').getImageData(0,0,W,H).data,L=new Uint8ClampedArray(W*H);
-    for(let i=0,k=0;k<L.length;i+=4,k++)L[k]=(d[i]*.299+d[i+1]*.587+d[i+2]*.114);
-    const regs=[[0,0,1,1]];for(const n of [2,3])for(let i=0;i<n;i++)for(let j=0;j<n;j++)regs.push([i/n,j/n,1/n+.15,1/n+.15]);
-    for(const [rx,ry,rw,rh] of regs){
-      const x=Math.floor(rx*W),y=Math.floor(ry*H),cw=Math.min(W-x,Math.floor(rw*W)),ch=Math.min(H-y,Math.floor(rh*H));
-      const C=new Uint8ClampedArray(cw*ch);for(let j=0;j<ch;j++)C.set(L.subarray((y+j)*W+x,(y+j)*W+x+cw),j*cw);
-      const R=new Uint8ClampedArray(cw*ch);for(let yy=0;yy<ch;yy++)for(let xx=0;xx<cw;xx++)R[xx*ch+(ch-1-yy)]=C[yy*cw+xx];
-      for(const [B,w,h] of [[C,cw,ch],[R,ch,cw]]){const src=new Z.RGBLuminanceSource(B,w,h);
-        for(const Bin of [Z.HybridBinarizer,Z.GlobalHistogramBinarizer]){try{const r=rd.decode(new Z.BinaryBitmap(new Bin(src)));if(r)found.add(cleanCode(r.getText()));break}catch(e){}finally{rd.reset()}}}
-    }
-    if(found.size)break;
+  const c=canvasOf(im,1600),W=c.width,H=c.height,d=c.getContext('2d').getImageData(0,0,W,H).data,L=new Uint8ClampedArray(W*H);
+  for(let i=0,k=0;k<L.length;i+=4,k++)L[k]=(d[i]*.299+d[i+1]*.587+d[i+2]*.114);
+  const regs=[[0,0,1,1]];for(let i=0;i<2;i++)for(let j=0;j<2;j++)regs.push([i/2,j/2,.65,.65]);
+  for(const [rx,ry,rw,rh] of regs){
+    const x=Math.floor(rx*W),y=Math.floor(ry*H),cw=Math.min(W-x,Math.floor(rw*W)),ch=Math.min(H-y,Math.floor(rh*H));
+    const C=new Uint8ClampedArray(cw*ch);for(let j=0;j<ch;j++)C.set(L.subarray((y+j)*W+x,(y+j)*W+x+cw),j*cw);
+    const R=new Uint8ClampedArray(cw*ch);for(let yy=0;yy<ch;yy++)for(let xx=0;xx<cw;xx++)R[xx*ch+(ch-1-yy)]=C[yy*cw+xx];
+    for(const [B,w,h] of [[C,cw,ch],[R,ch,cw]]){const src=new Z.RGBLuminanceSource(B,w,h);
+      for(const Bin of [Z.HybridBinarizer,Z.GlobalHistogramBinarizer]){try{const r=rd.decode(new Z.BinaryBitmap(new Bin(src)));if(r){const t=cleanCode(r.getText());if(t.length>=8&&t.length<=40)found.add(t)}break}catch(e){}finally{rd.reset()}}}
   }
-  return [...found].filter(keep);
+  return [...found];
 }
-async function numerosTexte(im){
-  await loadTS();const c=canvasOf(im,2200),g=c.getContext('2d'),d=g.getImageData(0,0,c.width,c.height),p=d.data;
-  for(let i=0;i<p.length;i+=4){let y=.299*p[i]+.587*p[i+1]+.114*p[i+2];y=Math.max(0,Math.min(255,(y-128)*1.5+128));p[i]=p[i+1]=p[i+2]=y}g.putImageData(d,0,0);
-  const {data}=await Tesseract.recognize(c,'eng');
-  const T=(data.text||'').toUpperCase(),out=new Set();
-  for(const line of T.split(/\n/)){
-    for(const tok of line.split(/[^A-Z0-9]+/))if(keep(tok))out.add(tok);           // FR3268170312, GL692682820JB
-    const joined=line.replace(/(\w)\s(?=\w{3,4}\b)/g,'$1').replace(/[^A-Z0-9 ]/g,' '); // 0052 000G L692 → 0052000GL692
-    for(const tok of joined.split(/\s+/))if(keep(tok))out.add(tok);
-  }
-  return [...out];
+const loadTess=()=>tessP||(tessP=new Promise((ok,ko)=>{const s=document.createElement('script');s.src='https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js';s.onload=ok;s.onerror=ko;document.head.appendChild(s)}));
+function parseLabel(raw){
+  const lines=String(raw||'').split(/\n+/).map(l=>l.trim()).filter(Boolean);
+  const U=l=>l.toUpperCase().normalize('NFD').replace(/[̀-ͯ]/g,'');
+  const out={numero:'',type:'C',cie:'',nom:'',prenom:'',produit:'',tel:'',infos:''};
+  // numéro
+  const pats=[/\b(\d[A-Z])\s?(\d{11})(?!\d)/,/\bFR\s?(\d{6})\s?(\d{4})(?!\d)/,/\b([A-Z]{2}\d{9}[A-Z]{2})\b/,/\b(\d{4})\s(\d{4})\s(\d{4})\s(\d{2})\b/,/\bFR\s?(\d{8,14})(?!\d)/,/\b([A-Z]{2}\d{9}[A-Z]{2})\b/,/\b((?:6A|6C|6G|8R|8L|8V|8Q|5V|1K|XC|CB|CE|LA|LB|LL|XB)\d{9,13})(?!\d)/,/\b([A-Z]{1,3}\d{9,14}[A-Z]{0,2})\b/];
+  outer:for(const re of pats)for(const l of lines){const c=U(l).replace(/(\d)\s(?=\d)/g,'$1');const m=U(l).match(re)||c.match(re);if(m){const j=m.slice(1).join('');out.numero=(String(re).includes('FR')?'FR':'')+j;break outer}}
+  // nom / prénom / compagnie
+  const CIE=/(\d)\s*(?:E|ER|ERE|EME|RE|°)?\s*(?:C\s*I\s*E|COMPAGNIE|CMP)\b/i;
+  const STOP=/\b(AV|AVENUE|RUE|BD|ECOLE|FRANCE|CHAUMONT|GENDARMERIE|RGT|REGIMENT|CEDEX|BP)\b/;
+  const GRADE=/^(EG|EGA|GAV|ESOG|ELEVE|SGT|MDL|MDC|ADJ|ADC|MAJ|LTN|SLT|CNE|CDT|LCL|COL|BRI|BCH|GND|M|MR|MME|MLLE|MLE)$/i;
+  const takeNames=l=>{const pre=l.split(/\d\s*(?:e|er|ere|ème|eme|re|°)?\s*(?:c\s*i\s*e|compagnie|cmp)\b/i)[0];
+    const toks=pre.replace(/[^A-Za-zÀ-ÿ' -]/g,' ').split(/\s+/).filter(t=>t.length>1&&!GRADE.test(t)&&!STOP.test(U(t))&&!/^(DE|DU|LA|LE|DES|ECOLE|GENDARMERIE|RI|ROUTE)$/i.test(t));
+    if(!toks.length)return;
+    const up=toks.filter(t=>t===t.toUpperCase()&&/[A-Z]/.test(t)),lo=toks.filter(t=>t!==t.toUpperCase());
+    if(up.length&&lo.length){out.nom=up.join(' ');out.prenom=lo.join(' ')}
+    else if(toks.length>1){out.prenom=toks[0];out.nom=toks.slice(1).join(' ').toUpperCase()}
+    else out.nom=toks[0].toUpperCase()};
+  const cl=lines.find(l=>CIE.test(U(l)));
+  if(cl){out.cie=U(cl).match(CIE)[1];takeNames(cl)}
+  if(!out.nom){const NM=/\b([A-ZÀ-Ý][a-zà-ÿ]{2,}(?:-[A-ZÀ-Ý][a-zà-ÿ]+)?)\s+([A-ZÀ-Ý]{2,}(?:[ -][A-ZÀ-Ý]{2,})*)\b|\b([A-ZÀ-Ý]{2,}(?:[ -][A-ZÀ-Ý]{2,})*)\s+([A-ZÀ-Ý][a-zà-ÿ]{2,}(?:-[A-ZÀ-Ý][a-zà-ÿ]+)?)\b/;
+    for(const l of lines){if(STOP.test(U(l))||/\d{3}/.test(l))continue;const m=l.match(NM);if(!m)continue;
+      const nom=(m[2]||m[3]).split(/\s+/).filter(t=>!GRADE.test(t)).join(' '),pre=m[1]||m[4];
+      if(nom.replace(/\W/g,'').length>=3&&!/^(CIE|CEDEX|FRANCE|CHAUMONT|CYCLE|DBF|ORY)$/.test(nom)){out.nom=nom;out.prenom=pre;break}}}
+  if(!out.nom){const nl=lines.find(l=>!/\d/.test(l)&&!STOP.test(U(l))&&l.length<40&&l.split(/\s+/).length>=2&&l.split(/\s+/).every(t=>/^[A-Za-zÀ-ÿ'-]{3,}$/.test(t))&&/\b[A-ZÀ-Ý]{3,}\b/.test(l));if(nl)takeNames(nl)}
+  // téléphone
+  const tel=lines.join(' ').match(/(?:\+33\s?|0)[1-9](?:[\s.\-]?\d{2}){4}/);if(tel)out.tel=tel[0];
+  // recommandé / produit
+  const all=U(lines.join(' '));
+  if(/RECOMMANDE|\bR[123]\b|AVIS DE RECEPTION/.test(all))out.type='R';
+  const brands=[['AMAZON','Colis Amazon'],['VINTED','Vinted'],['COLISSIMO','Colissimo'],['CHRONOPOST','Chronopost'],['MONDIAL RELAY','Mondial Relay'],['SHEIN','Shein'],['ZALANDO','Zalando'],['CDISCOUNT','Cdiscount'],['TEMU','Temu'],['ALIEXPRESS','AliExpress'],['DPD','DPD'],['UPS','UPS'],['GLS','GLS'],['DHL','DHL'],['SALOMON','Salomon'],['DECATHLON','Decathlon'],['NIKE','Nike'],['ADIDAS','Adidas']];
+  const b=brands.find(([k])=>new RegExp('\\b'+k+'\\b').test(all));
+  const mail=lines.join(' ').match(/@([a-z0-9-]+)\.(?:com|fr|net|eu|de|it|es)/i);
+  if(b)out.produit=b[1];else if(/\bCYCLE\s*\d\b/.test(all)||/\b(DBF|ORY|LYS)\d\b/.test(all))out.produit='Colis Amazon';
+  return out;
 }
-async function lireCodes(im){
+async function lireLocal(im){
+  await loadTess();
+  const c=canvasOf(im,2200),g=c.getContext('2d'),d=g.getImageData(0,0,c.width,c.height),px=d.data;
+  for(let i=0;i<px.length;i+=4){let y=.299*px[i]+.587*px[i+1]+.114*px[i+2];y=Math.max(0,Math.min(255,(y-128)*1.5+128));px[i]=px[i+1]=px[i+2]=y}
+  g.putImageData(d,0,0);
+  const {data}=await Tesseract.recognize(c,'fra');
+  const r=parseLabel(data.text);r._raw=data.text;
+  r.nom=r.prenom='';r.produit=r.produit||''; // lecture locale : trop d'erreurs sur les noms, on ne garde que numéro + compagnie
+  return r;
+}
+async function lire(im){
+  const bcP=codesBarres(im).catch(()=>[]);
+  let lab=null;
   if(lecture==='claude'){
-    try{const r=await api('/api/lire',{method:'POST',body:{image:canvasOf(im,1568).toDataURL('image/jpeg',.9)}});
-      const bc=await codesBarres(im).catch(()=>[]);return [...new Set([...(r.codes||[]).map(cleanCode).filter(c=>c.length>=6),...bc])]}
-    catch(e){if(e.status===401)throw e}
+    const b64=canvasOf(im,1568).toDataURL('image/jpeg',.9);
+    try{lab=await api('/api/lire',{method:'POST',body:{image:b64}})}catch(e){if(e.status===401)throw e;status('Lecture Claude indisponible'+(e.error?' ('+e.error+')':'')+', lecture du téléphone…','err',true)}
   }
-  const [bc,tx]=await Promise.all([codesBarres(im).catch(()=>[]),numerosTexte(im).catch(()=>[])]);
-  return [...new Set([...bc,...tx])];
+  if(!lab)lab=await lireLocal(im);
+  const bc=await bcP;
+  lab.codes=[...new Set([lab.numero,...(lab.codes||[]),...bc].map(cleanCode).filter(c=>c.length>=6))];
+  if(!lab.numero&&lab.codes.length)lab.numero=lab.codes[0];
+  return lab;
 }
 
-async function enregistrer(codes){
-  const d=findDup(codes);if(d)return alarm(d.it,d.hit);
-  try{const j=await api('/api/colis',{method:'POST',body:{codes}});items.push(j.item);ver=j.version;render();play(sO,600);
-    res('ok','✓ Nouveau colis enregistré',fmt(j.item.ts),j.item.codes)}
-  catch(e){if(e.status===409&&e.existing)alarm(e.existing,e.code);else if(e.status!==401)res('warn','Échec','Enregistrement impossible, réessaie.')}
-}
-$('scanBtn').onclick=()=>{unlock();$('cam').click()};
-$('cam').onchange=async e=>{
-  const f=e.target.files[0];e.target.value='';if(!f)return;
-  res('busy','Lecture des numéros…',lecture==='claude'?'':'10 à 20 secondes');
-  let im;try{im=await loadImg(f)}catch(err){return res('warn','Photo illisible','Reprends la photo.')}
-  let codes=[];try{codes=await lireCodes(im)}catch(err){if(err&&err.status===401)return}
+const missing=()=>[['num','numéro'],['nom','nom'],['prenom','prénom'],['prod','produit']].filter(([id])=>!$(id).value.trim());
+// fusionne une lecture dans le formulaire ; renvoie 'dup' | 'complet' | 'incomplet'
+async function applyLab(lab){
+  if(lab._raw!==undefined){$('raw').textContent=lab._raw.trim()||'(aucun texte reconnu)';$('rawBox').style.display='block'}else $('rawBox').style.display='none';
+  const num=String(lab.numero||'').replace(/\s+/g,'').toUpperCase();
+  const codes=lab.codes||[num].filter(Boolean);
+  if(num&&$('num').value.trim()&&!memeColis($('num').value,num)){$('f').reset();setType('C');curCodes=[]} // autre colis
   await refresh();
-  if(!codes.length)return res('warn','Aucun numéro trouvé','Reprends la photo plus près, ou tape le numéro en dessous.');
-  enregistrer(codes);
-};
-$('mf').onsubmit=e=>{e.preventDefault();unlock();const c=cleanCode($('mnum').value);if(c.length<4)return;$('mnum').value='';enregistrer([c])};
-$('q').oninput=render;
-$('list').onclick=async e=>{const b=e.target.closest('.del');if(!b)return;
-  const row=b.closest('li');if(!b.dataset.sure){b.dataset.sure='1';b.textContent='Suppr ?';b.style.color='var(--acc)';setTimeout(()=>{if(b.isConnected){delete b.dataset.sure;b.textContent='✕';b.style.color=''}},3000);return}
-  try{const j=await api('/api/colis/'+encodeURIComponent(b.dataset.id),{method:'DELETE'});items=items.filter(i=>i.id!==b.dataset.id);ver=j.version;render()}catch(err){}};
+  const d=findDupCodes(codes);if(d){alarm(d.it,false,d.code);curCodes=[];return 'dup'}
+  curCodes=[...new Set([...curCodes,...codes])];
+  const set=(id,v)=>{v=String(v||'').trim();if(v&&!$(id).value.trim())$(id).value=v};
+  set('num',num);set('prod',lab.produit);set('nom',lab.nom);set('prenom',lab.prenom);set('tel',lab.tel);set('infos',lab.infos);
+  if(lab.type==='R')setType('R');{const c=String(lab.cie||'').match(/\d+/);if(c&&+c[0]>=1&&+c[0]<=7&&!$('cie').value)$('cie').value=c[0]}
+  return $('num').value.trim()&&$('nom').value.trim()?'complet':'incomplet';
+}
 
-/* ---- connexion ---- */
+/* --- photo (secours) --- */
+$('cam').onchange=async e=>{
+  const file=e.target.files[0];e.target.value='';if(!file)return;
+  status(lecture==='claude'?'Lecture de l\'étiquette…':'Lecture de l\'étiquette (10 à 20 s)…','',true);
+  let im,u;try{({im,u}=await loadImg(file))}catch(err){status('Photo illisible, réessaie.','err');return}
+  $('prev').src=u;$('prev').style.display='block';
+  let lab;try{lab=await lire(im)}catch(err){status('Étiquette pas lue, reprends la photo ou tape les infos.','err');$('num').focus();return}
+  const r=await applyLab(lab);if(r==='dup')return;
+  const miss=missing();
+  status(miss.length?'Lu, sauf : '+miss.map(x=>x[1]).join(', ')+'. Complète puis enregistre.':'Tout est lu, vérifie puis enregistre.',miss.length>2?'err':'ok');
+};
+
+/* --- scan en direct (caméra) --- */
+const canLive=!!(window.isSecureContext&&navigator.mediaDevices&&navigator.mediaDevices.getUserMedia);
+const vid=$('vid');let stream=null,loopT=null,prevG=null,stableSince=0,armed=true,busy=false,tries=0,lastTry=0;
+const SM=document.createElement('canvas');SM.width=48;SM.height=36;const smg=SM.getContext('2d',{willReadFrequently:true});
+const chip=t=>{$('chip').textContent=t};
+if(canLive){$('scanTxt').textContent='Démarrer le scan';$('hint').textContent='La caméra lit l\'étiquette toute seule et enregistre le colis dès qu\'elle a le numéro et le nom.'}
+else $('hint').textContent='Prends toute l\'étiquette, bien droite, nette et sans reflet. (Scan en direct : il faut l\'adresse en https.)';
+async function startLive(){
+  unlockAudio();
+  if(!canLive){$('cam').click();return}
+  try{stream=await navigator.mediaDevices.getUserMedia({audio:false,video:{facingMode:{ideal:'environment'},width:{ideal:1920},height:{ideal:1440}}})}
+  catch(e){status('Caméra refusée : autorise-la (Réglages › Safari › Caméra) ou utilise la photo.','err');$('cam').click();return}
+  vid.srcObject=stream;try{await vid.play()}catch(e){}
+  $('live').hidden=false;$('liveBar').hidden=false;$('scanBtn').style.display='none';$('prev').style.display='none';
+  armed=true;tries=0;stableSince=0;prevG=null;chip('Vise l\'étiquette et ne bouge plus');
+  clearInterval(loopT);loopT=setInterval(tick,250);
+}
+function stopLive(){clearInterval(loopT);loopT=null;if(stream)stream.getTracks().forEach(t=>t.stop());stream=null;vid.srcObject=null;
+  $('live').hidden=true;$('liveBar').hidden=true;$('scanBtn').style.display='flex'}
+function tick(){
+  if(busy||!vid.videoWidth)return;
+  smg.drawImage(vid,0,0,48,36);const d=smg.getImageData(0,0,48,36).data,g=new Uint8Array(1728);let diff=0,sum=0;
+  for(let i=0,k=0;k<1728;i+=4,k++){g[k]=(d[i]+d[i+1]+d[i+2])/3;sum+=g[k];if(prevG)diff+=Math.abs(g[k]-prevG[k])}
+  diff/=1728;const first=!prevG;prevG=g;if(first)return;
+  const now=Date.now();
+  if(diff>6){stableSince=0;if(!armed&&diff>18){armed=true;tries=0;$('live').classList.remove('ok');chip('Vise l\'étiquette et ne bouge plus')}return}
+  if(!stableSince)stableSince=now;
+  if(sum/1728<35){chip('Trop sombre : rapproche-toi de la lumière');return}
+  if(armed&&now-stableSince>=600&&tries<3&&now-lastTry>(tries?2500:0))capture();
+}
+async function capture(){
+  busy=true;tries++;lastTry=Date.now();$('live').classList.add('busy');chip(lecture==='claude'?'Lecture…':'Lecture (10 à 20 s)…');
+  try{
+    const c=canvasOf(vid,1568);c.getContext('2d').drawImage(vid,0,0,c.width,c.height);
+    const lab=await lire(c);const r=await applyLab(lab);
+    if(r==='dup'){armed=false;chip('Déjà scanné ! Passe au colis suivant')}
+    else if(r==='complet'){const it=await saveCurrent(true);if(it){armed=false;$('live').classList.add('ok');beepOk();
+      chip('✓ '+[(it.nom||'').toUpperCase(),it.prenom].filter(Boolean).join(' ')+' enregistré · colis suivant');setTimeout(()=>$('live').classList.remove('ok'),1500)}}
+    else{const miss=missing().map(x=>x[1]);
+      if(tries>=3){armed=false;chip('Il manque : '+miss.join(', ')+'. Complète puis Enregistrer');}
+      else chip('Il manque : '+miss.join(', ')+' · nouvel essai…')}
+  }catch(e){if(e&&e.status===401)return stopLive();chip('Lecture ratée, nouvel essai…')}
+  finally{busy=false;$('live').classList.remove('busy');stableSince=0}
+}
+$('scanBtn').onclick=startLive;
+$('stopLive').onclick=stopLive;
+$('readNow').onclick=()=>{unlockAudio();if(!busy){tries=0;armed=true;capture()}};
+document.addEventListener('visibilitychange',()=>{if(document.hidden&&stream)stopLive()});
+
+$('num').addEventListener('change',()=>{const d=findDup($('num').value);if(d){unlockAudio();alarm(d)}});
+
+async function saveCurrent(auto){
+  const numero=$('num').value.trim().replace(/\s+/g,'');if(!numero){$('num').focus();return null}
+  const all=[...new Set([numero,...curCodes])];const d=findDupCodes(all);if(d){alarm(d.it,false,d.code);return null}
+  try{
+    const j=await api('/api/colis',{method:'POST',body:{numero,codes:all,produit:$('prod').value,nom:$('nom').value,prenom:$('prenom').value,tel:$('tel').value,infos:$('infos').value,obs:$('obs').value,cie:$('cie').value,type:ctype,vaguemestre:SIGN}});
+    items.push(j.item);ver=j.version;render();curCodes=[];
+    $('f').reset();setType('C');$('prev').style.display='none';$('rawBox').style.display='none';
+    status((auto?'Enregistré automatiquement : ':'Enregistré : ')+[(j.item.nom||'').toUpperCase(),j.item.prenom].filter(Boolean).join(' ')+' · '+fmt(j.item.ts)+'.','ok');
+    return j.item;
+  }catch(err){if(err.status===409&&err.existing){alarm(err.existing,false,err.code);curCodes=[]}else if(err.status!==401)status('Échec de l\'enregistrement, réessaie.','err');return null}
+}
+$('f').onsubmit=async e=>{e.preventDefault();unlockAudio();const it=await saveCurrent(false);if(it&&stream){armed=false;beepOk();chip('✓ Enregistré · colis suivant')}};
+$('clr').onclick=()=>{setType('C');curCodes=[];$('prev').style.display='none';status('')};
+$('q').oninput=render;
+$('shClose').onclick=()=>{$('sheet').style.display='none'};
+
+function setType(t){ctype=t;document.querySelectorAll('.seg button').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.t===t)))}
+document.querySelector('.seg').onclick=e=>{const b=e.target.closest('button');if(b)setType(b.dataset.t)};
+document.querySelector('.tabs').onclick=e=>{const b=e.target.closest('button');if(!b)return;tab=b.dataset.tab;document.querySelectorAll('.tabs button').forEach(x=>x.setAttribute('aria-selected',String(x===b)));render()};
+const cieTxt=c=>!c?'':(/^\d+$/.test(c)?c+(c==='1'?'re':'e')+' Cie':c);
+$('list').onclick=async e=>{
+  const cp=e.target.closest('.cp');
+  if(cp){const it=items.find(i=>i.id===cp.dataset.id);if(!it)return;const m=msgOf(it);
+    try{await navigator.clipboard.writeText(m);cp.textContent='Copié ✓';setTimeout(()=>cp.textContent='Copier le message',1800)}
+    catch(err){$('mtxt').value=m;$('sheet').style.display='flex';$('mtxt').focus();$('mtxt').select()}
+    return}
+  const b=e.target.closest('.val');if(!b)return;
+  const it=items.find(i=>i.id===b.dataset.id);if(!it)return;
+  b.disabled=true;const before=it.etat||'recu';
+  try{const j=await api(`/api/colis/${encodeURIComponent(it.id)}/etat`,{method:'POST',body:{etat:b.dataset.to}});
+    const k=items.findIndex(i=>i.id===j.item.id);if(k>=0)items[k]=j.item;ver=j.version;render();
+    lastDel={id:it.id,etat:before};
+    $('tmsg').textContent=`${(it.nom||'').toUpperCase()} ${it.prenom||''}`.trim()+(b.dataset.to==='remis'?' remis':' reporté');
+    $('toast').style.display='flex';clearTimeout(toastT);toastT=setTimeout(()=>{$('toast').style.display='none';lastDel=null},5000);
+  }catch(err){b.disabled=false}
+};
+$('undo').onclick=async()=>{if(!lastDel)return;const u=lastDel;lastDel=null;$('toast').style.display='none';
+  try{const j=await api(`/api/colis/${encodeURIComponent(u.id)}/etat`,{method:'POST',body:{etat:u.etat}});const k=items.findIndex(i=>i.id===j.item.id);if(k>=0)items[k]=j.item;ver=j.version;render()}catch(e){}};
+
+/* ---------- connexion ---------- */
 function showLogin(){$('login').style.display='flex';setTimeout(()=>$('pw').focus(),50)}
-$('lf').onsubmit=async e=>{e.preventDefault();$('lerr').textContent='';try{await api('/api/login',{method:'POST',body:{password:$('pw').value}});$('pw').value='';$('login').style.display='none';start()}catch(err){$('lerr').textContent=err.error||'Erreur'}};
+$('lf').onsubmit=async e=>{e.preventDefault();$('lerr').textContent='';
+  try{await api('/api/login',{method:'POST',body:{password:$('pw').value}});$('pw').value='';$('login').style.display='none';start()}
+  catch(err){$('lerr').textContent=err.error||'Erreur de connexion'}};
 $('logout').onclick=async()=>{try{await api('/api/logout',{method:'POST'})}catch(e){}items=[];ver=0;render();showLogin()};
+
 let poll=null;
-async function start(){try{const me=await api('/api/me');lecture=me.lecture}catch(e){return}await refresh();clearInterval(poll);poll=setInterval(refresh,4000);loadZX().catch(()=>{})}
+async function start(){
+  try{const me=await api('/api/me');lecture=me.lecture;SIGN=me.signature||SIGN;$('vg').textContent='Vaguemestre : '+SIGN+' · date et heure de réception automatiques'}catch(e){return}
+  await refresh();clearInterval(poll);poll=setInterval(refresh,4000);loadZX().catch(()=>{});
+}
+document.addEventListener('touchend',unlockAudio,{once:true});document.addEventListener('click',unlockAudio,{once:true});
 document.addEventListener('visibilitychange',()=>{if(!document.hidden)refresh()});
 render();start();
 }

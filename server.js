@@ -62,6 +62,10 @@ function save() {
 // FR1283838 et 1283838 = même colis
 const numKey = n => String(n || '').toUpperCase().replace(/[^A-Z0-9]/g, '').replace(/^FR/, '');
 const clean = (v, max = 300) => String(v ?? '').trim().slice(0, max);
+// clés de comparaison : GL692682820JB → aussi GL692682820 (le code-barres l'embarque souvent sans le suffixe)
+const keysOf = c => { const k = numKey(c); const out = [k]; const m = k.match(/^([A-Z]{2}\d{9})[A-Z]{2}$/); if (m) out.push(m[1]); return out.filter(x => x.length >= 4); };
+const memeColis = (a, b) => { for (const x of keysOf(a)) for (const y of keysOf(b)) { if (x === y) return true; if (x.length >= 10 && y.length >= 10 && (x.includes(y) || y.includes(x))) return true; } return false; };
+const codesOf = c => (c.codes && c.codes.length ? c.codes : [c.numero]).filter(Boolean);
 
 // ---------- helpers HTTP ----------
 function send(res, code, obj, headers = {}) {
@@ -88,10 +92,26 @@ const authed = req => sessions.has(cookies(req).sid);
 const isHttps = req => req.headers['x-forwarded-proto'] === 'https';
 
 // ---------- lecture d'étiquette par Claude (si clé API) ----------
-const PROMPT = `Photo d'une étiquette de colis ou de recommandé. Relève TOUS les identifiants du colis qui y sont imprimés :
-numéros de suivi (ex. FR3268170312, GL692682820JB, 6A12345678901, RL123456789FR, 1Z…), numéros écrits sous les codes-barres, références d'envoi, numéros de colis/SSCC.
-N'inclus PAS : numéros de téléphone, codes postaux, dates, heures, poids, prix, numéros de rue, noms, adresses.
-Recopie chaque identifiant exactement, sans espaces. Réponds UNIQUEMENT avec ce JSON : {"codes":["...","..."]} (liste vide si rien).`;
+const PROMPT = `Tu lis la photo d'une étiquette de colis reçue à l'École de gendarmerie de Chaumont (adresse : 1 avenue du 109e RI, 52000 Chaumont). Extrais :
+
+- numero : LE numéro de suivi principal, recopié exactement sans espaces ni tirets. Formats selon le transporteur :
+  • Colissimo / La Poste : 2 caractères + 11 chiffres, ex. 6C21339014797, 6A12345678901, 8R…, 6C62089323500 (souvent après « Num colis : », parfois écrit « 6C 21339014797 »). C'est le cas le plus fréquent.
+  • Amazon : FR + 10 chiffres, ex. FR3269215560 (parfois imprimé en deux morceaux « FR326794 1872 » → FR3267941872).
+  • Chronopost : 2 lettres + 9 chiffres + 2 lettres, ex. XN217543973JB, GL692682820JB.
+  • DPD : 14 chiffres après « Track », ex. « 1031 4002 0826 30 » → 10314002082630.
+  • DHL / Deutsche Post : « Shipment No. », ex. CI161997812DE. UPS : 1Z…. Recommandé : 2 lettres + 9 chiffres + FR.
+- codes : TOUS les autres identifiants du colis visibles (numéros sous les codes-barres, « Track », références d'envoi, SSCC), sans espaces. Le numero y figure aussi.
+- type : « R » si c'est un recommandé (mention recommandé, R1/R2/R3, avis de réception), sinon « C ».
+- nom : NOM de famille du destinataire en MAJUSCULES, sans grade ni civilité (ignore EG, GAV, M., Mme…). Les étiquettes écrivent « NOM Prénom » ou « Prénom NOM » : le nom de famille est souvent en majuscules ; s'il n'y a aucun indice, le prénom est le mot qui est un prénom courant (Antoine, Lila, Ewen, Maxime…).
+- prenom : prénom du destinataire (Première lettre en majuscule).
+- cie : numéro de compagnie (1 à 7) s'il apparaît : « 1cie », « 1ere CIE », « 6 CIE », « 1 compagnie », « 6eme Compagnie », « 1 cie » collé au nom, ou une mention manuscrite comme « C1 », « 1C », « CI 1 ». Sinon vide.
+- produit : expéditeur ou marque si visible (Decathlon, Salomon, Amazon, Vinted…), sinon le transporteur.
+- tel : téléphone du destinataire s'il est écrit, sinon vide.
+- infos : autre indication utile (section, bâtiment, « contre signature », « fragile »), court, sinon vide.
+
+Ne confonds pas avec : codes postaux, dates, poids, codes de tri (DBF1, ORY1, LYS8, 52U60, FR-COL-1176-52CHA, 802-FR-52000), numéros de compte ou de client de l'expéditeur, adresse.
+N'invente rien : chaîne vide si illisible. Réponds UNIQUEMENT avec ce JSON :
+{"numero":"","codes":[],"type":"C","nom":"","prenom":"","cie":"","produit":"","tel":"","infos":""}`;
 
 async function appelClaude(b64) {
   const ctl = new AbortController();
@@ -129,8 +149,15 @@ async function lireEtiquette(b64) {
   const m = txt.match(/\{[\s\S]*\}/);
   if (!m) throw new Error('réponse illisible');
   const o = JSON.parse(m[0]);
-  const codes = [...new Set((Array.isArray(o.codes) ? o.codes : []).map(c => String(c).replace(/\s+/g, '').toUpperCase()).filter(c => c.length >= 6 && c.length <= 40))];
-  return { codes };
+  const norm = c => String(c || '').replace(/[\s-]+/g, '').toUpperCase();
+  const out = {};
+  for (const k of ['type', 'cie', 'nom', 'prenom', 'produit', 'tel', 'infos']) out[k] = String(o[k] ?? '').trim();
+  out.numero = norm(o.numero);
+  out.codes = [...new Set([out.numero, ...(Array.isArray(o.codes) ? o.codes : []).map(norm)].filter(c => c.length >= 6 && c.length <= 40))];
+  out.type = out.type.toUpperCase() === 'R' ? 'R' : 'C';
+  out.nom = out.nom.toUpperCase();
+  out.cie = (out.cie.match(/[1-7]/) || [''])[0];
+  return out;
 }
 
 // ---------- routes ----------
@@ -166,15 +193,20 @@ const server = http.createServer(async (req, res) => {
       }
       if (p === '/api/colis' && req.method === 'POST') {
         const b = await readBody(req, 50000);
-        let codes = (Array.isArray(b.codes) ? b.codes : [b.numero]).map(c => clean(c, 60).replace(/\s+/g, '').toUpperCase()).filter(c => numKey(c).length >= 4);
+        const numero = clean(b.numero, 60).replace(/[\s-]+/g, '').toUpperCase();
+        let codes = [numero, ...(Array.isArray(b.codes) ? b.codes : [])].map(c => clean(c, 60).replace(/[\s-]+/g, '').toUpperCase()).filter(c => numKey(c).length >= 4);
         codes = [...new Set(codes)].slice(0, 20);
-        if (!codes.length) return send(res, 400, { error: 'aucun numéro' });
-        const keys = new Set(codes.map(numKey));
+        if (!codes.length) return send(res, 400, { error: 'numéro manquant' });
         for (const c of colis) {
-          const hit = (c.codes || [c.numero]).find(x => keys.has(numKey(x)));
-          if (hit) return send(res, 409, { error: 'doublon', existing: c, code: hit });
+          for (const x of codesOf(c)) { const hit = codes.find(y => memeColis(x, y)); if (hit) return send(res, 409, { error: 'doublon', existing: c, code: x }); }
         }
-        const it = { id: crypto.randomBytes(8).toString('hex'), codes, numero: codes[0], numKey: numKey(codes[0]), ts: Date.now(), etat: 'recu', vaguemestre: SIGNATURE };
+        const it = {
+          id: crypto.randomBytes(8).toString('hex'), numero: numero || codes[0], codes, numKey: numKey(numero || codes[0]),
+          produit: clean(b.produit), nom: clean(b.nom, 100).toUpperCase(), prenom: clean(b.prenom, 100),
+          tel: clean(b.tel, 30), infos: clean(b.infos, 500), obs: clean(b.obs, 500),
+          type: b.type === 'R' ? 'R' : 'C', cie: clean(b.cie, 30), vaguemestre: clean(b.vaguemestre, 60) || SIGNATURE,
+          ts: Date.now(), etat: 'recu', reporteAt: null, remisAt: null
+        };
         colis.push(it); save();
         return send(res, 201, { item: it, version });
       }

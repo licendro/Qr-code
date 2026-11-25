@@ -1,11 +1,11 @@
 # Scan colis — registre du vaguemestre
 
-Petite app web pour savoir si un colis a déjà été scanné :
+Petite app web pour enregistrer les colis du vaguemestre :
 
-- tu prends l'étiquette en photo : l'app relève **tous les numéros** (codes-barres + numéros de suivi), sans les noms ;
-- si l'un de ces numéros a déjà été scanné : **alarme** (bip fort, écran rouge, « DÉJÀ SCANNÉ » avec la date) ;
-- sinon le colis est enregistré avec la date et l'heure ;
-- saisie manuelle possible, recherche, suppression d'un scan ;
+- **scan en direct** (https) : la caméra lit l'étiquette et enregistre seule dès qu'elle a le numéro et le nom ; sinon photo ;
+- lecture par Claude (clé API) : numéro de suivi (Colissimo 6C…, Amazon FR…, Chronopost XN…JB, DPD, DHL…), nom, prénom, compagnie, expéditeur ;
+- tous les numéros de l'étiquette sont gardés : si l'un d'eux a déjà été scanné → **alarme** ;
+- suivi À reporter → À remettre → Remis, message WhatsApp, recherche ;
 - liste partagée entre tous tes appareils, protégée par un mot de passe.
 
 Pas de dépendance : il suffit de Node.js 20 ou plus. Les données sont dans `data/` (jamais envoyées sur GitHub). Une sauvegarde est faite chaque jour dans `data/backups/`, et les 60 derniers jours sont gardés.
@@ -46,6 +46,13 @@ sudo ufw allow 3000/tcp
 ```
 
 Ensuite, ouvre `http://IP-DU-VPS:3000` sur ton iPhone. Dans Safari, touche **Partager → Sur l'écran d'accueil** pour l'avoir comme une app.
+
+## HTTPS (obligatoire pour le scan en direct)
+
+1. IONOS → DNS de jdev-hub.fr : enregistrement **A** `colis` → `217.160.243.228`, **sans AAAA**.
+2. Vérifier : `dig +short A colis.jdev-hub.fr @ns1075.ui-dns.com` doit afficher l'IP, et `dig +short AAAA colis.jdev-hub.fr @1.1.1.1` rien.
+3. `sed -i 's/server_name 217.160.243.228;/server_name colis.jdev-hub.fr 217.160.243.228;/' /etc/nginx/sites-available/qr-code && nginx -t && systemctl reload nginx`
+4. `certbot --nginx -d colis.jdev-hub.fr --redirect --agree-tos --register-unsafely-without-email`
 
 ## Mettre à jour sans perdre les données
 
