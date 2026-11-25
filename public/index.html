@@ -296,7 +296,7 @@ function parseLabel(raw){
       if(nom.replace(/\W/g,'').length>=3&&!/^(CIE|CEDEX|FRANCE|CHAUMONT|CYCLE|DBF|ORY)$/.test(nom)){out.nom=nom;out.prenom=pre;break}}}
   if(!out.nom){const nl=lines.find(l=>!/\d/.test(l)&&!STOP.test(U(l))&&l.length<40&&l.split(/\s+/).length>=2&&l.split(/\s+/).every(t=>/^[A-Za-zÀ-ÿ'-]{3,}$/.test(t))&&/\b[A-ZÀ-Ý]{3,}\b/.test(l));if(nl)takeNames(nl)}
   // téléphone
-  const tel=lines.join(' ').match(/(?:\+33\s?|0)[1-9](?:[\s.\-]?\d{2}){4}/);if(tel)out.tel=tel[0];
+  const tel=lines.join(' ').match(/\+33\s?[1-9](?:[\s.]?\d{2}){4}\b|\b0[67](?:[\s.]\d{2}){4}\b/);if(tel)out.tel=tel[0]; // seulement des formats de portable sûrs
   // recommandé / produit
   const all=U(lines.join(' '));
   if(/RECOMMANDE|\bR[123]\b|AVIS DE RECEPTION/.test(all))out.type='R';

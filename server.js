@@ -136,7 +136,7 @@ async function appelClaude(b64) {
       method: 'POST', signal: ctl.signal,
       headers: { 'x-api-key': API_KEY, 'anthropic-version': '2023-06-01', 'content-type': 'application/json', ...(WORKSPACE ? { 'anthropic-workspace-id': WORKSPACE } : {}) },
       body: JSON.stringify({
-        model: MODEL, max_tokens: 600, temperature: 0,
+        model: MODEL, max_tokens: 600,
         messages: [{ role: 'user', content: [
           { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: b64 } },
           { type: 'text', text: PROMPT }
