@@ -107,7 +107,9 @@ const authed = req => sessions.has(cookies(req).sid);
 const isHttps = req => req.headers['x-forwarded-proto'] === 'https';
 
 // ---------- lecture d'étiquette par Claude (si clé API) ----------
-const PROMPT = `Tu lis la photo d'une étiquette de colis reçue à l'École de gendarmerie de Chaumont (adresse : 1 avenue du 109e RI, 52000 Chaumont). Extrais :
+const PROMPT = `Tu lis la photo d'une étiquette de colis reçue à l'École de gendarmerie de Chaumont (adresse : 1 avenue du 109e RI, 52000 Chaumont).
+IMPORTANT : lis UNIQUEMENT l'étiquette principale, celle qui occupe le centre / la plus grande partie de l'image. Ignore complètement les autres colis, étiquettes, étagères ou papiers visibles autour ou en arrière-plan. Toutes les infos (numéro, nom, compagnie) doivent venir de cette même étiquette.
+Extrais :
 
 - numero : LE numéro de suivi principal, recopié exactement sans espaces ni tirets. Formats selon le transporteur :
   • Colissimo / La Poste : 2 caractères + 11 chiffres, ex. 6C21339014797, 6A12345678901, 8R…, 6C62089323500 (souvent après « Num colis : », parfois écrit « 6C 21339014797 »). C'est le cas le plus fréquent.
@@ -122,11 +124,12 @@ const PROMPT = `Tu lis la photo d'une étiquette de colis reçue à l'École de 
 - cie : numéro de compagnie (1 à 7) s'il apparaît : « 1cie », « 1ere CIE », « 6 CIE », « 1 compagnie », « 6eme Compagnie », « 1 cie » collé au nom, ou une mention manuscrite comme « C1 », « 1C », « CI 1 ». Sinon vide.
 - produit : expéditeur ou marque si visible (Decathlon, Salomon, Amazon, Vinted…), sinon le transporteur.
 - tel : téléphone du destinataire s'il est écrit, sinon vide.
-- infos : autre indication utile (section, bâtiment, « contre signature », « fragile »), court, sinon vide.
+- infos : seulement une mention imprimée utile (section, bâtiment, « contre signature », « fragile »), en 5 mots max, sinon vide. JAMAIS de commentaire de ta part (pas de « illisible », « incertain », « lu comme »…).
 
 Ne confonds pas avec : codes postaux, dates, poids, codes de tri (DBF1, ORY1, LYS8, 52U60, FR-COL-1176-52CHA, 802-FR-52000), numéros de compte ou de client de l'expéditeur, adresse.
-N'invente rien : chaîne vide si illisible. Réponds UNIQUEMENT avec ce JSON :
-{"numero":"","codes":[],"type":"C","nom":"","prenom":"","cie":"","produit":"","tel":"","infos":""}`;
+N'invente rien et ne devine pas : un champ dont tu n'es pas sûr reste vide (mieux vaut vide que faux). Chaque caractère du numéro doit être clairement lisible, sinon numero vide.
+Si l'image est floue ou l'étiquette coupée, mets "illisible": true. Réponds TOUJOURS et UNIQUEMENT avec ce JSON, sans texte autour :
+{"numero":"","codes":[],"type":"C","nom":"","prenom":"","cie":"","produit":"","tel":"","infos":"","illisible":false}`;
 
 async function appelClaude(b64) {
   const ctl = new AbortController();
@@ -162,8 +165,8 @@ async function lireEtiquette(b64) {
   }
   if (txt === undefined) throw last;
   const m = txt.match(/\{[\s\S]*\}/);
-  if (!m) throw new Error('réponse illisible');
-  const o = JSON.parse(m[0]);
+  let o = {};
+  try { o = m ? JSON.parse(m[0]) : { illisible: true }; } catch (e) { o = { illisible: true }; }
   const norm = c => String(c || '').replace(/[\s-]+/g, '').toUpperCase();
   const out = {};
   for (const k of ['type', 'cie', 'nom', 'prenom', 'produit', 'tel', 'infos']) out[k] = String(o[k] ?? '').trim();
@@ -172,6 +175,8 @@ async function lireEtiquette(b64) {
   out.type = out.type.toUpperCase() === 'R' ? 'R' : 'C';
   out.nom = out.nom.toUpperCase();
   out.cie = (out.cie.match(/[1-7]/) || [''])[0];
+  out.illisible = !!o.illisible;
+  if (/illisible|incertain|flou|lu comme|valeur/i.test(out.infos)) out.infos = '';
   return out;
 }
 

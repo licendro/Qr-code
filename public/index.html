@@ -103,12 +103,13 @@ select{font:16px Inter,sans-serif;padding:11px 12px;border:1.5px solid var(--lin
   <section class="label">
     <button class="scan" id="scanBtn" type="button" style="display:flex">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 7V4h3M21 7V4h-3M3 17v3h3M21 17v3h-3"/><path d="M7 8v8M10 8v8M13 8v8M16 8v8"/></svg>
-      <span id="scanTxt">Scanner un colis</span>
+      <span id="scanTxt">Photo du colis</span>
     </button>
+    <button class="btn" id="liveBtn" type="button" hidden style="width:100%;margin-top:10px">Scan en direct (caméra continue)</button>
     <input type="file" id="cam" accept="image/*" capture="environment" hidden>
     <div class="live" id="live" hidden><video id="vid" playsinline muted autoplay></video><div class="frame"></div><div class="chip" id="chip"></div></div>
     <div class="liveBar" id="liveBar" hidden><button class="btn" id="readNow" type="button">Lire maintenant</button><button class="btn" id="stopLive" type="button">Arrêter</button></div>
-    <p class="hint" id="hint">Prends toute l'étiquette, bien droite, nette et sans reflet.</p>
+    <p class="hint" id="hint">Remplis l'écran avec l'étiquette, bien à plat et sans reflet. L'iPhone fait la mise au point, l'app analyse ensuite.</p>
     <div class="status" id="status"></div>
     <img class="prev" id="prev" alt="Photo du colis">
     <details id="rawBox" style="display:none;margin-top:8px;font-size:13px;color:var(--mute)"><summary>Texte lu sur l'étiquette</summary><pre id="raw" style="white-space:pre-wrap;font-size:12px"></pre></details>
@@ -349,25 +350,33 @@ async function applyLab(lab){
 /* --- photo (secours) --- */
 $('cam').onchange=async e=>{
   const file=e.target.files[0];e.target.value='';if(!file)return;
-  status(lecture==='claude'?'Lecture de l\'étiquette…':'Lecture de l\'étiquette (10 à 20 s)…','',true);
+  $('f').reset();setType('C');curCodes=[];   // chaque photo = un nouveau colis
+  status(lecture==='claude'?'Analyse de l\'étiquette… (quelques secondes)':'Analyse de l\'étiquette (10 à 20 s)…','',true);
   let im,u;try{({im,u}=await loadImg(file))}catch(err){status('Photo illisible, réessaie.','err');return}
   $('prev').src=u;$('prev').style.display='block';
   let lab;try{lab=await lire(im)}catch(err){status('Étiquette pas lue, reprends la photo ou tape les infos.','err');$('num').focus();return}
+  if(lab.illisible&&!lab.numero){status('Photo trop floue ou étiquette coupée : reprends-la plus près, bien à plat.','err');return}
   const r=await applyLab(lab);if(r==='dup')return;
+  if(r==='complet'){const it=await saveCurrent(true);if(it){beepOk();offerUndo(it)}return}
   const miss=missing();
-  status(miss.length?'Lu, sauf : '+miss.map(x=>x[1]).join(', ')+'. Complète puis enregistre.':'Tout est lu, vérifie puis enregistre.',miss.length>2?'err':'ok');
+  status('Lu, sauf : '+miss.map(x=>x[1]).join(', ')+'. Complète puis Enregistrer.','err');
+  (miss.length?$(miss[0][0]):$('num')).focus();
 };
+function offerUndo(it){
+  lastDel={id:it.id,del:true};$('tmsg').textContent='✓ '+([(it.nom||'').toUpperCase(),it.prenom].filter(Boolean).join(' ')||it.numero)+' enregistré';
+  $('toast').style.display='flex';clearTimeout(toastT);toastT=setTimeout(()=>{$('toast').style.display='none';lastDel=null},6000);
+}
 
 /* --- scan en direct (caméra) --- */
 const canLive=!!(window.isSecureContext&&navigator.mediaDevices&&navigator.mediaDevices.getUserMedia);
 const vid=$('vid');let stream=null,loopT=null,prevG=null,stableSince=0,armed=true,busy=false,tries=0,lastTry=0;
 const SM=document.createElement('canvas');SM.width=48;SM.height=36;const smg=SM.getContext('2d',{willReadFrequently:true});
 const chip=t=>{$('chip').textContent=t};
-if(canLive){$('scanTxt').textContent='Démarrer le scan';$('hint').textContent='La caméra lit l\'étiquette toute seule et enregistre le colis dès qu\'elle a le numéro et le nom.'}
-else $('hint').textContent='Prends toute l\'étiquette, bien droite, nette et sans reflet. (Scan en direct : il faut l\'adresse en https.)';
+if(canLive)$('liveBtn').hidden=false;
 async function startLive(){
   unlockAudio();
   if(!canLive){$('cam').click();return}
+  $('liveBtn').hidden=true;
   try{stream=await navigator.mediaDevices.getUserMedia({audio:false,video:{facingMode:{ideal:'environment'},width:{ideal:1920},height:{ideal:1440}}})}
   catch(e){status('Caméra refusée : autorise-la (Réglages › Safari › Caméra) ou utilise la photo.','err');$('cam').click();return}
   vid.srcObject=stream;try{await vid.play()}catch(e){}
@@ -376,8 +385,23 @@ async function startLive(){
   clearInterval(loopT);loopT=setInterval(tick,250);
 }
 function stopLive(){clearInterval(loopT);loopT=null;if(stream)stream.getTracks().forEach(t=>t.stop());stream=null;vid.srcObject=null;
-  $('live').hidden=true;$('liveBar').hidden=true;$('scanBtn').style.display='flex'}
-let armedAt=0;
+  $('live').hidden=true;$('liveBar').hidden=true;$('scanBtn').style.display='flex';if(canLive)$('liveBtn').hidden=false}
+let armedAt=0,bestC=null,bestSharp=0,bestAt=0;
+const SH=document.createElement('canvas');SH.width=120;SH.height=90;const shg=SH.getContext('2d',{willReadFrequently:true});
+function sharpness(){ // variance du laplacien au centre de l'image = netteté
+  const vw=vid.videoWidth,vh=vid.videoHeight;shg.drawImage(vid,vw*.25,vh*.25,vw*.5,vh*.5,0,0,120,90);
+  const d=shg.getImageData(0,0,120,90).data,G=new Float32Array(10800);for(let i=0,k=0;k<10800;i+=4,k++)G[k]=(d[i]+d[i+1]+d[i+2])/3;
+  let s=0,s2=0,n=0;for(let y=1;y<89;y++)for(let x=1;x<119;x++){const k=y*120+x,l=4*G[k]-G[k-1]-G[k+1]-G[k-120]-G[k+120];s+=l;s2+=l*l;n++}
+  return s2/n-(s/n)**2;
+}
+function guideCrop(){ // zone visible dans le cadre blanc (vidéo en object-fit: cover, cadre à 7 %)
+  const vw=vid.videoWidth,vh=vid.videoHeight,box=$('live').getBoundingClientRect(),a=box.width/box.height;
+  let x=0,y=0,w=vw,h=vh;if(vw/vh>a){w=vh*a;x=(vw-w)/2}else{h=vw/a;y=(vh-h)/2}
+  const m=.04;return [x+w*m,y+h*m,w*(1-2*m),h*(1-2*m)];
+}
+function snapBest(){const [x,y,w,h]=guideCrop(),sc=Math.min(1,1568/Math.max(w,h));
+  bestC=bestC||document.createElement('canvas');bestC.width=Math.round(w*sc);bestC.height=Math.round(h*sc);
+  bestC.getContext('2d').drawImage(vid,x,y,w,h,0,0,bestC.width,bestC.height);bestAt=Date.now()}
 function tick(){
   if(busy||!vid.videoWidth)return;
   smg.drawImage(vid,0,0,48,36);const d=smg.getImageData(0,0,48,36).data,g=new Uint8Array(1728);let diff=0,sum=0;
@@ -388,17 +412,22 @@ function tick(){
   if(!armed){if(diff>15){armed=true;tries=0;armedAt=now;stableSince=0;$('live').classList.remove('ok');chip('Vise l\'étiquette')}return}
   if(sum/1728<30){chip('Trop sombre : rapproche-toi de la lumière');return}
   if(diff<12){if(!stableSince)stableSince=now}else stableSince=0;   // tolérant : main qui tremble = ok
+  if(stableSince){const sh=sharpness();if(sh>bestSharp*1.03||now-bestAt>1500){bestSharp=sh;snapBest()}}
   if(tries>=3||now-lastTry<(tries?2500:0))return;
-  const stable=stableSince&&now-stableSince>=400;
-  const patience=now-armedAt>2500;                                   // au pire, on lit quand même après 2,5 s
+  const stable=stableSince&&now-stableSince>=900;   // on laisse ~1 s pour la mise au point
+  const patience=now-armedAt>3500;                                   // au pire, on lit quand même après 2,5 s
   if(stable||patience){chip('Lecture…');capture()}
   else chip('Tiens le téléphone stable…');
 }
 async function capture(){
   busy=true;tries++;lastTry=Date.now();$('live').classList.add('busy');chip(lecture==='claude'?'Lecture…':'Lecture (10 à 20 s)…');
   try{
-    const c=canvasOf(vid,1568);c.getContext('2d').drawImage(vid,0,0,c.width,c.height);
-    const lab=await lire(c);const r=await applyLab(lab);
+    if(!bestC||Date.now()-bestAt>1500)snapBest();
+    const c=document.createElement('canvas');c.width=bestC.width;c.height=bestC.height;c.getContext('2d').drawImage(bestC,0,0);
+    bestSharp=0;$('f').reset();setType('C');curCodes=[];
+    const lab=await lire(c);
+    if(lab.illisible&&!lab.numero){chip('Image floue : rapproche-toi, tiens stable…');return}
+    const r=await applyLab(lab);
     if(r==='dup'){armed=false;chip('Déjà scanné ! Passe au colis suivant')}
     else if(r==='complet'){const it=await saveCurrent(true);if(it){armed=false;$('live').classList.add('ok');beepOk();
       chip('✓ '+[(it.nom||'').toUpperCase(),it.prenom].filter(Boolean).join(' ')+' enregistré · colis suivant');setTimeout(()=>$('live').classList.remove('ok'),1500)}}
@@ -408,7 +437,8 @@ async function capture(){
   }catch(e){if(e&&e.status===401)return stopLive();chip('Lecture ratée, nouvel essai…')}
   finally{busy=false;$('live').classList.remove('busy');stableSince=0}
 }
-$('scanBtn').onclick=startLive;
+$('scanBtn').onclick=()=>{unlockAudio();if(stream)stopLive();$('cam').click()};
+$('liveBtn').onclick=startLive;
 $('stopLive').onclick=stopLive;
 $('readNow').onclick=()=>{unlockAudio();if(!busy){tries=0;armed=true;armedAt=Date.now();capture()}};
 document.addEventListener('visibilitychange',()=>{if(document.hidden&&stream)stopLive()});
@@ -457,6 +487,7 @@ $('list').onclick=async e=>{
   }catch(err){b.disabled=false}
 };
 $('undo').onclick=async()=>{if(!lastDel)return;const u=lastDel;lastDel=null;$('toast').style.display='none';
+  if(u.del){try{await api('/api/colis/'+encodeURIComponent(u.id),{method:'DELETE'});items=items.filter(i=>i.id!==u.id);render();status('Enregistrement annulé.','')}catch(e){}return}
   try{const j=await api(`/api/colis/${encodeURIComponent(u.id)}/etat`,{method:'POST',body:{etat:u.etat}});const k=items.findIndex(i=>i.id===j.item.id);if(k>=0)items[k]=j.item;ver=j.version;render()}catch(e){}};
 
 /* ---------- connexion ---------- */
