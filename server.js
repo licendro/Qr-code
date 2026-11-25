@@ -18,6 +18,7 @@ const PORT = Number(process.env.PORT) || 3000;
 const PASSWORD = process.env.APP_PASSWORD || '';
 const API_KEY = process.env.ANTHROPIC_API_KEY || '';
 const MODEL = process.env.ANTHROPIC_MODEL || 'claude-sonnet-5-5';
+const WORKSPACE = process.env.ANTHROPIC_WORKSPACE_ID || '';
 const SIGNATURE = process.env.SIGNATURE || 'Julien MERCERON';
 if (!PASSWORD || PASSWORD === 'change-moi') {
   console.error('⚠  Définis APP_PASSWORD dans le fichier .env avant de lancer l\'app.');
@@ -133,7 +134,7 @@ async function appelClaude(b64) {
   try {
     const r = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST', signal: ctl.signal,
-      headers: { 'x-api-key': API_KEY, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
+      headers: { 'x-api-key': API_KEY, 'anthropic-version': '2023-06-01', 'content-type': 'application/json', ...(WORKSPACE ? { 'anthropic-workspace-id': WORKSPACE } : {}) },
       body: JSON.stringify({
         model: MODEL, max_tokens: 600, temperature: 0,
         messages: [{ role: 'user', content: [
