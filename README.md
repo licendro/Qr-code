@@ -2,7 +2,7 @@
 
 Petite app web pour enregistrer les colis :
 
-- tu prends l'étiquette en photo et l'app remplit le numéro FR, le nom, le prénom, le produit, le téléphone et les infos (société, unité…) ;
+- caméra en direct (en https) : l'app lit l'étiquette toute seule et enregistre le colis dès qu'elle a le numéro et le nom ; sinon tu prends une photo et l'app remplit le numéro FR, le nom, le prénom, le produit, le téléphone et les infos (société, unité…) ;
 - la date et l'heure s'enregistrent automatiquement ;
 - tu peux chercher dans la liste ;
 - **Validé ✓** retire le colis de la liste (il reste en base pour détecter les doublons) ;
@@ -49,24 +49,33 @@ sudo ufw allow 3000/tcp
 
 Ensuite, ouvre `http://IP-DU-VPS:3000` sur ton iPhone. Dans Safari, touche **Partager → Sur l'écran d'accueil** pour l'avoir comme une app.
 
-## HTTPS avec un nom de domaine (recommandé)
+## HTTPS (obligatoire pour le scan en direct avec la caméra)
 
-Sur iPhone, le bouton « Copier le message » marche mieux en HTTPS, et ton mot de passe ne passe plus en clair.
+Sur iPhone, Safari n'ouvre la caméra en direct qu'en **https**. Il faut donc un sous-domaine, par exemple `colis.jdev-hub.fr`.
 
-1. Chez ton registrar, crée un enregistrement DNS **A** `colis.ton-domaine.fr` qui pointe vers l'IP du VPS.
-2. Sur le VPS :
+1. Chez ton hébergeur DNS (IONOS) : ajoute un enregistrement **A**, nom `colis`, valeur `217.160.243.228`.
+2. Sur le VPS (nginx déjà installé) :
 
 ```bash
-sudo apt install -y caddy
-echo 'colis.ton-domaine.fr {
-    reverse_proxy localhost:3000
-}' | sudo tee /etc/caddy/Caddyfile
-sudo systemctl reload caddy
-sudo ufw allow 80/tcp && sudo ufw allow 443/tcp
-sudo ufw delete allow 3000/tcp     # l'app n'est plus accessible qu'en https
+cat > /etc/nginx/sites-available/qr-code <<'NGINX'
+server {
+    listen 80;
+    server_name colis.jdev-hub.fr 217.160.243.228;
+    client_max_body_size 15m;
+    location / {
+        proxy_pass http://127.0.0.1:3010;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 90s;
+    }
+}
+NGINX
+nginx -t && systemctl reload nginx
+apt install -y certbot python3-certbot-nginx
+certbot --nginx -d colis.jdev-hub.fr --redirect --agree-tos --register-unsafely-without-email
 ```
 
-Ensuite, ouvre `https://colis.ton-domaine.fr`. Caddy s'occupe tout seul du certificat.
+3. Ouvre `https://colis.jdev-hub.fr` : le bouton devient « Démarrer le scan ».
 
 ## Mettre à jour sans perdre les données
 

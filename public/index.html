@@ -68,6 +68,12 @@ select{font:16px Inter,sans-serif;padding:11px 12px;border:1.5px solid var(--lin
 .bdg{display:inline-block;font:800 12px Archivo;border-radius:6px;padding:1px 6px;margin-right:6px;vertical-align:2px;background:var(--tape);color:#fff}
 .bdg.r{background:#2457c5}
 .ob{font-size:14px;font-style:italic}
+.live{position:relative;border-radius:12px;overflow:hidden;background:#000;aspect-ratio:3/4;max-height:62vh;margin:0 auto}
+.live video{width:100%;height:100%;object-fit:cover;display:block}
+.live .frame{position:absolute;inset:7%;border:3px solid rgba(255,255,255,.75);border-radius:14px;transition:border-color .2s}
+.live.busy .frame{border-color:#ffd23f}.live.ok .frame{border-color:#3ddc84;border-width:6px}
+.chip{position:absolute;left:50%;bottom:14px;transform:translateX(-50%);background:rgba(0,0,0,.72);color:#fff;padding:7px 14px;border-radius:999px;font-size:14px;width:max-content;max-width:90%;text-align:center}
+.liveBar{display:flex;gap:10px;margin-top:10px}.liveBar .btn{flex:1}
 .empty{text-align:center;color:var(--mute);padding:28px 10px;background:var(--card);border-radius:12px;opacity:.85}
 .toast{position:fixed;left:50%;bottom:calc(20px + env(safe-area-inset-bottom));transform:translateX(-50%);background:var(--ink);color:var(--card);border-radius:12px;padding:10px 10px 10px 16px;display:none;gap:12px;align-items:center;box-shadow:0 8px 24px rgba(0,0,0,.3);z-index:5;max-width:92vw}
 .toast button{background:transparent;border:1.5px solid var(--card);color:var(--card);border-radius:8px;min-height:40px;padding:0 12px;font:600 14px Inter;cursor:pointer}
@@ -93,12 +99,14 @@ select{font:16px Inter,sans-serif;padding:11px 12px;border:1.5px solid var(--lin
   <p class="sub">Photo de l'étiquette → infos remplies → reporté au registre → remis.</p>
 
   <section class="label">
-    <button class="scan" id="scanBtn" type="button">
+    <button class="scan" id="scanBtn" type="button" style="display:flex">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 7V4h3M21 7V4h-3M3 17v3h3M21 17v3h-3"/><path d="M7 8v8M10 8v8M13 8v8M16 8v8"/></svg>
-      Scanner un colis
+      <span id="scanTxt">Scanner un colis</span>
     </button>
     <input type="file" id="cam" accept="image/*" capture="environment" hidden>
-    <p class="hint">Prends toute l'étiquette, bien droite, nette et sans reflet.</p>
+    <div class="live" id="live" hidden><video id="vid" playsinline muted autoplay></video><div class="frame"></div><div class="chip" id="chip"></div></div>
+    <div class="liveBar" id="liveBar" hidden><button class="btn" id="readNow" type="button">Lire maintenant</button><button class="btn" id="stopLive" type="button">Arrêter</button></div>
+    <p class="hint" id="hint">Prends toute l'étiquette, bien droite, nette et sans reflet.</p>
     <div class="status" id="status"></div>
     <img class="prev" id="prev" alt="Photo du colis">
     <details id="rawBox" style="display:none;margin-top:8px;font-size:13px;color:var(--mute)"><summary>Texte lu sur l'étiquette</summary><pre id="raw" style="white-space:pre-wrap;font-size:12px"></pre></details>
@@ -154,23 +162,23 @@ async function api(path,opt={}){
 }
 
 /* ---------- son + alarme ---------- */
-function makeWav(){
-  const sr=22050,dur=1.4,n=Math.floor(sr*dur),buf=new ArrayBuffer(44+n),v=new DataView(buf);
+function makeWav(kind){
+  const sr=22050,dur=kind==='ok'?.45:1.4,n=Math.floor(sr*dur),buf=new ArrayBuffer(44+n),v=new DataView(buf);
   const w=(o,t)=>{for(let i=0;i<t.length;i++)v.setUint8(o+i,t.charCodeAt(i))};
   w(0,'RIFF');v.setUint32(4,36+n,true);w(8,'WAVEfmt ');v.setUint32(16,16,true);v.setUint16(20,1,true);v.setUint16(22,1,true);
   v.setUint32(24,sr,true);v.setUint32(28,sr,true);v.setUint16(32,1,true);v.setUint16(34,8,true);w(36,'data');v.setUint32(40,n,true);
-  for(let i=0;i<n;i++){const t=i/sr,seg=Math.floor(t/.2),f=seg%2?520:1040,on=(t%.2)<.17;v.setUint8(44+i,on?(Math.sin(2*Math.PI*f*t)>=0?250:6):128)}
+  for(let i=0;i<n;i++){const t=i/sr;let s=128;
+    if(kind==='ok'){const f=t<.15?1320:1760,on=t<.13||(t>.18&&t<.42);if(on)s=128+Math.round(90*Math.sin(2*Math.PI*f*t))}
+    else{const seg=Math.floor(t/.2),f=seg%2?520:1040,on=(t%.2)<.17;if(on)s=Math.sin(2*Math.PI*f*t)>=0?250:6}
+    v.setUint8(44+i,s)}
   return URL.createObjectURL(new Blob([buf],{type:'audio/wav'}));
 }
-const snd=new Audio(makeWav());snd.preload='auto';let sndReady=false,beeping=false;
-function unlockAudio(){
-  if(sndReady)return;
-  try{snd.muted=true;const p=snd.play();if(p&&p.then)p.then(()=>{if(!beeping){snd.pause();snd.currentTime=0}snd.muted=false;sndReady=true}).catch(()=>{snd.muted=false});else{snd.pause();snd.muted=false;sndReady=true}}catch(e){snd.muted=false}
-}
-function beepAlarm(){
-  beeping=true;sndReady=true;setTimeout(()=>beeping=false,1600);
-  try{snd.muted=false;snd.volume=1;snd.currentTime=0;const p=snd.play();if(p&&p.catch)p.catch(()=>{})}catch(e){}
-}
+const snd=new Audio(makeWav('alarm')),sndOk=new Audio(makeWav('ok'));snd.preload=sndOk.preload='auto';
+const unlocked=new Set();
+function unlockOne(a){if(unlocked.has(a))return;try{a.muted=true;const p=a.play();const done=()=>{if(!a._busy){a.pause();a.currentTime=0}a.muted=false;unlocked.add(a)};if(p&&p.then)p.then(done).catch(()=>{a.muted=false});else done()}catch(e){a.muted=false}}
+function unlockAudio(){unlockOne(snd);unlockOne(sndOk)}
+function play(a,ms){a._busy=true;unlocked.add(a);setTimeout(()=>a._busy=false,ms);try{a.muted=false;a.volume=1;a.currentTime=0;const p=a.play();if(p&&p.catch)p.catch(()=>{})}catch(e){}}
+const beepAlarm=()=>play(snd,1600),beepOk=()=>play(sndOk,600);
 function alarm(ex,test){
   const qui=[ex.prenom,(ex.nom||'').toUpperCase()].filter(Boolean).join(' ')||'sans nom';
   $('amsg').textContent=`${ex.numero} — ${qui}. Scanné le ${fmt(ex.ts)}${ex.remisAt?', remis le '+fmt(ex.remisAt):ex.reporteAt?', reporté le '+fmt(ex.reporteAt)+', pas encore remis':', pas encore reporté'}.`;
@@ -218,7 +226,7 @@ async function refresh(){
 
 /* ---------- lecture d'étiquette ---------- */
 function loadImg(file){return new Promise((ok,ko)=>{const u=URL.createObjectURL(file),im=new Image();im.onload=()=>ok({im,u});im.onerror=ko;im.src=u})}
-function canvasOf(im,max){const sc=Math.min(1,max/Math.max(im.naturalWidth,im.naturalHeight));const c=document.createElement('canvas');c.width=Math.round(im.naturalWidth*sc);c.height=Math.round(im.naturalHeight*sc);c.getContext('2d').drawImage(im,0,0,c.width,c.height);return c}
+function canvasOf(im,max){const W=im.naturalWidth||im.videoWidth||im.width,H=im.naturalHeight||im.videoHeight||im.height;const sc=Math.min(1,max/Math.max(W,H));const c=document.createElement('canvas');c.width=Math.round(W*sc);c.height=Math.round(H*sc);c.getContext('2d').drawImage(im,0,0,c.width,c.height);return c}
 let tessP=null;
 const loadTess=()=>tessP||(tessP=new Promise((ok,ko)=>{const s=document.createElement('script');s.src='https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js';s.onload=ok;s.onerror=ko;document.head.appendChild(s)}));
 function parseLabel(raw){
@@ -241,7 +249,7 @@ function parseLabel(raw){
     else out.nom=toks[0].toUpperCase()};
   const cl=lines.find(l=>CIE.test(U(l)));
   if(cl){out.cie=U(cl).match(CIE)[1];takeNames(cl)}
-  else{const nl=lines.find(l=>!/\d/.test(l)&&!STOP.test(U(l))&&/\b[A-ZÀ-Ý]{3,}\b/.test(l)&&/\b[A-ZÀ-Ý][a-zà-ÿ]{2,}\b/.test(l));if(nl)takeNames(nl)}
+  else{const nl=lines.find(l=>!/\d/.test(l)&&!STOP.test(U(l))&&l.length<40&&l.split(/\s+/).length>=2&&l.split(/\s+/).every(t=>/^[A-Za-zÀ-ÿ'-]{3,}$/.test(t))&&/\b[A-ZÀ-Ý]{3,}\b/.test(l));if(nl)takeNames(nl)}
   // téléphone
   const tel=lines.join(' ').match(/(?:\+33\s?|0)[1-9](?:[\s.\-]?\d{2}){4}/);if(tel)out.tel=tel[0];
   // recommandé / produit
@@ -269,35 +277,95 @@ async function lire(im){
   return lireLocal(im);
 }
 
-$('scanBtn').onclick=()=>{unlockAudio();$('cam').click()};
+const missing=()=>[['num','numéro'],['nom','nom'],['prenom','prénom'],['prod','produit']].filter(([id])=>!$(id).value.trim());
+// fusionne une lecture dans le formulaire ; renvoie 'dup' | 'complet' | 'incomplet'
+async function applyLab(lab){
+  if(lab._raw!==undefined){$('raw').textContent=lab._raw.trim()||'(aucun texte reconnu)';$('rawBox').style.display='block'}else $('rawBox').style.display='none';
+  const num=String(lab.numero||'').replace(/\s+/g,'').toUpperCase();
+  if(num&&$('num').value.trim()&&numKey($('num').value)!==numKey(num)){$('f').reset();setType('C')} // autre colis
+  await refresh();
+  const dup=findDup(num);if(dup){alarm(dup);return 'dup'}
+  const set=(id,v)=>{v=String(v||'').trim();if(v&&!$(id).value.trim())$(id).value=v};
+  set('num',num);set('prod',lab.produit);set('nom',lab.nom);set('prenom',lab.prenom);set('tel',lab.tel);set('infos',lab.infos);
+  if(lab.type==='R')setType('R');{const c=String(lab.cie||'').match(/\d+/);if(c&&+c[0]>=1&&+c[0]<=7&&!$('cie').value)$('cie').value=c[0]}
+  return $('num').value.trim()&&$('nom').value.trim()?'complet':'incomplet';
+}
+
+/* --- photo (secours) --- */
 $('cam').onchange=async e=>{
   const file=e.target.files[0];e.target.value='';if(!file)return;
   status(lecture==='claude'?'Lecture de l\'étiquette…':'Lecture de l\'étiquette (10 à 20 s)…','',true);
   let im,u;try{({im,u}=await loadImg(file))}catch(err){status('Photo illisible, réessaie.','err');return}
   $('prev').src=u;$('prev').style.display='block';
   let lab;try{lab=await lire(im)}catch(err){status('Étiquette pas lue, reprends la photo ou tape les infos.','err');$('num').focus();return}
-  if(lab._raw!==undefined){$('raw').textContent=lab._raw.trim()||'(aucun texte reconnu)';$('rawBox').style.display='block'}else $('rawBox').style.display='none';
-  const num=String(lab.numero||'').replace(/\s+/g,'');
-  await refresh();
-  const dup=findDup(num);if(dup)return alarm(dup);
-  const set=(id,v)=>{v=String(v||'').trim();if(v)$(id).value=v};
-  set('num',num);set('prod',lab.produit);set('nom',lab.nom);set('prenom',lab.prenom);set('tel',lab.tel);set('infos',lab.infos);if(lab.type==='R')setType('R');{const c=String(lab.cie||'').match(/\d+/);if(c&&+c[0]>=1&&+c[0]<=7)$('cie').value=c[0]}
-  const miss=[['num','numéro'],['nom','nom'],['prenom','prénom'],['prod','produit']].filter(([id])=>!$(id).value.trim());
+  const r=await applyLab(lab);if(r==='dup')return;
+  const miss=missing();
   status(miss.length?'Lu, sauf : '+miss.map(x=>x[1]).join(', ')+'. Complète puis enregistre.':'Tout est lu, vérifie puis enregistre.',miss.length>2?'err':'ok');
-  (miss.length?$(miss[0][0]):$('num')).focus();
 };
+
+/* --- scan en direct (caméra) --- */
+const canLive=!!(window.isSecureContext&&navigator.mediaDevices&&navigator.mediaDevices.getUserMedia);
+const vid=$('vid');let stream=null,loopT=null,prevG=null,stableSince=0,armed=true,busy=false,tries=0,lastTry=0;
+const SM=document.createElement('canvas');SM.width=48;SM.height=36;const smg=SM.getContext('2d',{willReadFrequently:true});
+const chip=t=>{$('chip').textContent=t};
+if(canLive){$('scanTxt').textContent='Démarrer le scan';$('hint').textContent='La caméra lit l\'étiquette toute seule et enregistre le colis dès qu\'elle a le numéro et le nom.'}
+else $('hint').textContent='Prends toute l\'étiquette, bien droite, nette et sans reflet. (Scan en direct : il faut l\'adresse en https.)';
+async function startLive(){
+  unlockAudio();
+  if(!canLive){$('cam').click();return}
+  try{stream=await navigator.mediaDevices.getUserMedia({audio:false,video:{facingMode:{ideal:'environment'},width:{ideal:1920},height:{ideal:1440}}})}
+  catch(e){status('Caméra refusée : autorise-la (Réglages › Safari › Caméra) ou utilise la photo.','err');$('cam').click();return}
+  vid.srcObject=stream;try{await vid.play()}catch(e){}
+  $('live').hidden=false;$('liveBar').hidden=false;$('scanBtn').style.display='none';$('prev').style.display='none';
+  armed=true;tries=0;stableSince=0;prevG=null;chip('Vise l\'étiquette et ne bouge plus');
+  clearInterval(loopT);loopT=setInterval(tick,250);
+}
+function stopLive(){clearInterval(loopT);loopT=null;if(stream)stream.getTracks().forEach(t=>t.stop());stream=null;vid.srcObject=null;
+  $('live').hidden=true;$('liveBar').hidden=true;$('scanBtn').style.display='flex'}
+function tick(){
+  if(busy||!vid.videoWidth)return;
+  smg.drawImage(vid,0,0,48,36);const d=smg.getImageData(0,0,48,36).data,g=new Uint8Array(1728);let diff=0,sum=0;
+  for(let i=0,k=0;k<1728;i+=4,k++){g[k]=(d[i]+d[i+1]+d[i+2])/3;sum+=g[k];if(prevG)diff+=Math.abs(g[k]-prevG[k])}
+  diff/=1728;const first=!prevG;prevG=g;if(first)return;
+  const now=Date.now();
+  if(diff>6){stableSince=0;if(!armed&&diff>18){armed=true;tries=0;$('live').classList.remove('ok');chip('Vise l\'étiquette et ne bouge plus')}return}
+  if(!stableSince)stableSince=now;
+  if(sum/1728<35){chip('Trop sombre : rapproche-toi de la lumière');return}
+  if(armed&&now-stableSince>=600&&tries<3&&now-lastTry>(tries?2500:0))capture();
+}
+async function capture(){
+  busy=true;tries++;lastTry=Date.now();$('live').classList.add('busy');chip(lecture==='claude'?'Lecture…':'Lecture (10 à 20 s)…');
+  try{
+    const c=canvasOf(vid,1568);c.getContext('2d').drawImage(vid,0,0,c.width,c.height);
+    const lab=await lire(c);const r=await applyLab(lab);
+    if(r==='dup'){armed=false;chip('Déjà scanné ! Passe au colis suivant')}
+    else if(r==='complet'){const it=await saveCurrent(true);if(it){armed=false;$('live').classList.add('ok');beepOk();
+      chip('✓ '+[(it.nom||'').toUpperCase(),it.prenom].filter(Boolean).join(' ')+' enregistré · colis suivant');setTimeout(()=>$('live').classList.remove('ok'),1500)}}
+    else{const miss=missing().map(x=>x[1]);
+      if(tries>=3){armed=false;chip('Il manque : '+miss.join(', ')+'. Complète puis Enregistrer');}
+      else chip('Il manque : '+miss.join(', ')+' · nouvel essai…')}
+  }catch(e){if(e&&e.status===401)return stopLive();chip('Lecture ratée, nouvel essai…')}
+  finally{busy=false;$('live').classList.remove('busy');stableSince=0}
+}
+$('scanBtn').onclick=startLive;
+$('stopLive').onclick=stopLive;
+$('readNow').onclick=()=>{unlockAudio();if(!busy){tries=0;armed=true;capture()}};
+document.addEventListener('visibilitychange',()=>{if(document.hidden&&stream)stopLive()});
+
 $('num').addEventListener('change',()=>{const d=findDup($('num').value);if(d){unlockAudio();alarm(d)}});
 
-$('f').onsubmit=async e=>{
-  e.preventDefault();unlockAudio();
-  const numero=$('num').value.trim().replace(/\s+/g,'');if(!numero){$('num').focus();return}
-  const dup=findDup(numero);if(dup)return alarm(dup);
+async function saveCurrent(auto){
+  const numero=$('num').value.trim().replace(/\s+/g,'');if(!numero){$('num').focus();return null}
+  const dup=findDup(numero);if(dup){alarm(dup);return null}
   try{
     const j=await api('/api/colis',{method:'POST',body:{numero,produit:$('prod').value,nom:$('nom').value,prenom:$('prenom').value,tel:$('tel').value,infos:$('infos').value,obs:$('obs').value,cie:$('cie').value,type:ctype,vaguemestre:SIGN}});
     items.push(j.item);ver=j.version;render();
-    $('f').reset();setType('C');$('prev').style.display='none';status('Enregistré le '+fmt(j.item.ts)+'.','ok');
-  }catch(err){if(err.status===409&&err.existing)alarm(err.existing);else if(err.status!==401)status('Échec de l\'enregistrement, réessaie.','err')}
-};
+    $('f').reset();setType('C');$('prev').style.display='none';$('rawBox').style.display='none';
+    status((auto?'Enregistré automatiquement : ':'Enregistré : ')+[(j.item.nom||'').toUpperCase(),j.item.prenom].filter(Boolean).join(' ')+' · '+fmt(j.item.ts)+'.','ok');
+    return j.item;
+  }catch(err){if(err.status===409&&err.existing)alarm(err.existing);else if(err.status!==401)status('Échec de l\'enregistrement, réessaie.','err');return null}
+}
+$('f').onsubmit=async e=>{e.preventDefault();unlockAudio();const it=await saveCurrent(false);if(it&&stream){armed=false;beepOk();chip('✓ Enregistré · colis suivant')}};
 $('clr').onclick=()=>{setType('C');$('prev').style.display='none';status('')};
 $('q').oninput=render;
 $('shClose').onclick=()=>{$('sheet').style.display='none'};
