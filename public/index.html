@@ -372,21 +372,27 @@ async function startLive(){
   catch(e){status('Caméra refusée : autorise-la (Réglages › Safari › Caméra) ou utilise la photo.','err');$('cam').click();return}
   vid.srcObject=stream;try{await vid.play()}catch(e){}
   $('live').hidden=false;$('liveBar').hidden=false;$('scanBtn').style.display='none';$('prev').style.display='none';
-  armed=true;tries=0;stableSince=0;prevG=null;chip('Vise l\'étiquette et ne bouge plus');
+  armed=true;tries=0;stableSince=0;prevG=null;armedAt=Date.now();chip('Vise l\'étiquette');
   clearInterval(loopT);loopT=setInterval(tick,250);
 }
 function stopLive(){clearInterval(loopT);loopT=null;if(stream)stream.getTracks().forEach(t=>t.stop());stream=null;vid.srcObject=null;
   $('live').hidden=true;$('liveBar').hidden=true;$('scanBtn').style.display='flex'}
+let armedAt=0;
 function tick(){
   if(busy||!vid.videoWidth)return;
   smg.drawImage(vid,0,0,48,36);const d=smg.getImageData(0,0,48,36).data,g=new Uint8Array(1728);let diff=0,sum=0;
   for(let i=0,k=0;k<1728;i+=4,k++){g[k]=(d[i]+d[i+1]+d[i+2])/3;sum+=g[k];if(prevG)diff+=Math.abs(g[k]-prevG[k])}
-  diff/=1728;const first=!prevG;prevG=g;if(first)return;
+  diff/=1728;const first=!prevG;prevG=g;if(first){armedAt=Date.now();return}
   const now=Date.now();
-  if(diff>6){stableSince=0;if(!armed&&diff>18){armed=true;tries=0;$('live').classList.remove('ok');chip('Vise l\'étiquette et ne bouge plus')}return}
-  if(!stableSince)stableSince=now;
-  if(sum/1728<35){chip('Trop sombre : rapproche-toi de la lumière');return}
-  if(armed&&now-stableSince>=600&&tries<3&&now-lastTry>(tries?2500:0))capture();
+  // gros mouvement = on passe au colis suivant
+  if(!armed){if(diff>15){armed=true;tries=0;armedAt=now;stableSince=0;$('live').classList.remove('ok');chip('Vise l\'étiquette')}return}
+  if(sum/1728<30){chip('Trop sombre : rapproche-toi de la lumière');return}
+  if(diff<12){if(!stableSince)stableSince=now}else stableSince=0;   // tolérant : main qui tremble = ok
+  if(tries>=3||now-lastTry<(tries?2500:0))return;
+  const stable=stableSince&&now-stableSince>=400;
+  const patience=now-armedAt>2500;                                   // au pire, on lit quand même après 2,5 s
+  if(stable||patience){chip('Lecture…');capture()}
+  else chip('Tiens le téléphone stable…');
 }
 async function capture(){
   busy=true;tries++;lastTry=Date.now();$('live').classList.add('busy');chip(lecture==='claude'?'Lecture…':'Lecture (10 à 20 s)…');
@@ -404,7 +410,7 @@ async function capture(){
 }
 $('scanBtn').onclick=startLive;
 $('stopLive').onclick=stopLive;
-$('readNow').onclick=()=>{unlockAudio();if(!busy){tries=0;armed=true;capture()}};
+$('readNow').onclick=()=>{unlockAudio();if(!busy){tries=0;armed=true;armedAt=Date.now();capture()}};
 document.addEventListener('visibilitychange',()=>{if(document.hidden&&stream)stopLive()});
 
 $('num').addEventListener('change',()=>{const d=findDup($('num').value);if(d){unlockAudio();alarm(d)}});
