@@ -17,7 +17,7 @@ try {
 const PORT = Number(process.env.PORT) || 3000;
 const PASSWORD = process.env.APP_PASSWORD || '';
 const API_KEY = process.env.ANTHROPIC_API_KEY || '';
-const MODEL = process.env.ANTHROPIC_MODEL || 'claude-haiku-5-5';
+const MODEL = process.env.ANTHROPIC_MODEL || 'claude-sonnet-5-5';
 const SIGNATURE = process.env.SIGNATURE || 'Julien MERCERON';
 if (!PASSWORD || PASSWORD === 'change-moi') {
   console.error('⚠  Définis APP_PASSWORD dans le fichier .env avant de lancer l\'app.');
@@ -92,31 +92,55 @@ const PROMPT = `Photo d'une étiquette de colis (pas forcément droite). Lis-la 
 - numero : le numéro de suivi du colis ou du recommandé (souvent « FR… », mais aussi « 6A… », « 8R… », « XC… », « RL… », « CB… », « 1K… »…). Recopie-le exactement, sans espaces. S'il n'y en a aucun, prends le petit numéro imprimé à côté du nom du destinataire.
 - type : « R » si c'est un recommandé (mention « recommandé », « lettre recommandée », « R1/R2/R3 », avis de réception), sinon « C ».
 - cie : le numéro de compagnie du destinataire s'il est écrit (ex. « 7e Cie », « 7 CIE », « 7ème compagnie » → « 7 »), sinon vide.
-- nom : NOM de famille du destinataire
+- nom : NOM de famille du destinataire (sans grade : ignore EG, GAV, M., Mme, SGT…)
 - prenom : prénom du destinataire
 - produit : ce que contient le colis ou à défaut l'expéditeur / la marque (ex. « Colis Amazon », « Vinted »), court.
 - tel : numéro de téléphone du destinataire s'il est écrit (chiffres seulement, sinon vide).
 - infos : les autres indications utiles près du destinataire : société / compagnie / unité, service, bâtiment, étage, chambre, mentions comme « fragile » ou « contre signature ». Sépare-les par « · ». Pas l'adresse postale complète, pas l'expéditeur, pas la compagnie (déjà dans cie).
 Réponds UNIQUEMENT avec ce JSON : {"numero":"","type":"C","cie":"","nom":"","prenom":"","produit":"","tel":"","infos":""} — chaîne vide si illisible, n'invente rien.`;
 
+async function appelClaude(b64) {
+  const ctl = new AbortController();
+  const t = setTimeout(() => ctl.abort(), 45000);
+  try {
+    const r = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST', signal: ctl.signal,
+      headers: { 'x-api-key': API_KEY, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
+      body: JSON.stringify({
+        model: MODEL, max_tokens: 600, temperature: 0,
+        messages: [{ role: 'user', content: [
+          { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: b64 } },
+          { type: 'text', text: PROMPT }
+        ] }]
+      })
+    });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) { const e = new Error(j?.error?.message || ('API ' + r.status)); e.status = r.status; throw e; }
+    return (j.content || []).map(c => c.text || '').join('');
+  } finally { clearTimeout(t); }
+}
+
 async function lireEtiquette(b64) {
-  const r = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: { 'x-api-key': API_KEY, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
-    body: JSON.stringify({
-      model: MODEL, max_tokens: 500,
-      messages: [{ role: 'user', content: [
-        { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: b64 } },
-        { type: 'text', text: PROMPT }
-      ] }]
-    })
-  });
-  const j = await r.json();
-  if (!r.ok) throw new Error(j?.error?.message || ('API ' + r.status));
-  const txt = (j.content || []).map(c => c.text || '').join('');
+  let txt, last;
+  for (let essai = 0; essai < 3; essai++) {
+    try { txt = await appelClaude(b64); break; }
+    catch (e) {
+      last = e;
+      // surcharge / limite / réseau : on réessaie ; clé invalide ou crédit épuisé : inutile
+      if (e.status && ![429, 500, 502, 503, 529].includes(e.status)) throw e;
+      await new Promise(r => setTimeout(r, 1500 * (essai + 1)));
+    }
+  }
+  if (txt === undefined) throw last;
   const m = txt.match(/\{[\s\S]*\}/);
   if (!m) throw new Error('réponse illisible');
-  return JSON.parse(m[0]);
+  const o = JSON.parse(m[0]);
+  const out = {};
+  for (const k of ['numero', 'type', 'cie', 'nom', 'prenom', 'produit', 'tel', 'infos']) out[k] = String(o[k] ?? '').trim();
+  out.numero = out.numero.replace(/\s+/g, '').toUpperCase();
+  out.type = out.type.toUpperCase() === 'R' ? 'R' : 'C';
+  out.nom = out.nom.toUpperCase();
+  return out;
 }
 
 // ---------- routes ----------
@@ -213,4 +237,4 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-server.listen(PORT, () => console.log(`Scan colis en ligne sur le port ${PORT} — ${colis.length} colis en base, lecture ${API_KEY ? 'Claude' : 'locale'}`));
+server.listen(PORT, () => console.log(`Scan colis en ligne sur le port ${PORT} — ${colis.length} colis en base, lecture ${API_KEY ? 'Claude (' + MODEL + ')' : 'locale'}`));

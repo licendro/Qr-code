@@ -87,7 +87,7 @@ cp data/colis.json ~/colis-sauvegarde.json   # sauvegarde manuelle
 
 ## Lecture des étiquettes
 
-- **Avec `ANTHROPIC_API_KEY`** (dans `.env`) : Claude lit toute l'étiquette (numéro FR, nom, prénom, produit, téléphone, infos). La clé se crée sur console.anthropic.com. Chaque lecture coûte une petite fraction de centime avec le modèle Haiku.
+- **Avec `ANTHROPIC_API_KEY`** (dans `.env`) : Claude lit toute l'étiquette (numéro FR, nom, prénom, produit, téléphone, infos). La clé se crée sur console.anthropic.com. Par défaut, l'app utilise Claude Sonnet 5.5 (fiable, environ 0,6 centime par colis). Mets `ANTHROPIC_MODEL=claude-haiku-5-5` pour payer environ 20 fois moins. Si l'API ne répond pas, l'app bascule sur la lecture locale.
 - **Sans clé** : lecture locale sur le téléphone. Elle trouve seulement le numéro FR et le téléphone, et il faut taper le nom à la main.
 
 ## Remarque

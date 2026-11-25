@@ -263,8 +263,8 @@ async function lireLocal(im){
 }
 async function lire(im){
   if(lecture==='claude'){
-    const b64=canvasOf(im,2000).toDataURL('image/jpeg',.88);
-    try{return await api('/api/lire',{method:'POST',body:{image:b64}})}catch(e){if(e.status===401)throw e}
+    const b64=canvasOf(im,1568).toDataURL('image/jpeg',.9);
+    try{return await api('/api/lire',{method:'POST',body:{image:b64}})}catch(e){if(e.status===401)throw e;status('Lecture Claude indisponible'+(e.error?' ('+e.error+')':'')+', lecture du téléphone…','err',true)}
   }
   return lireLocal(im);
 }
