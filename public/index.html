@@ -191,9 +191,10 @@ $('testAlarm').onclick=()=>alarm({numero:'FRTEST',nom:'Test',prenom:'',ts:Date.n
 $('alarm').onclick=()=>$('alarm').classList.remove('on');
 const keysOf=c=>{const k=numKey(c),o=[k],m=k.match(/^([A-Z]{2}\d{9})[A-Z]{2}$/);if(m)o.push(m[1]);return o.filter(x=>x.length>=4)};
 const memeColis=(a,b)=>{for(const x of keysOf(a))for(const y of keysOf(b)){if(x===y)return true;if(x.length>=10&&y.length>=10&&(x.includes(y)||y.includes(x)))return true}return false};
-const codesOf=i=>(i.codes&&i.codes.length?i.codes:[i.numero]).filter(Boolean);
+const suivi=c=>{const k=numKey(c);return (/[A-Z]/.test(k)&&/\d{6}/.test(k)&&k.length>=10)||/^\d{12,}$/.test(k)};
+const codesOf=i=>[...new Set([i.numero,...(i.codes||[])].filter(Boolean))].filter((x,n)=>n===0||suivi(x));
 let curCodes=[];
-function findDupCodes(list){for(const it of items)for(const x of codesOf(it))if(list.some(y=>memeColis(x,y)))return {it,code:x};return null}
+function findDupCodes(list){list=list.filter((x,n)=>n===0||suivi(x));for(const it of items)for(const x of codesOf(it))if(list.some(y=>memeColis(x,y)))return {it,code:x};return null}
 const findDup=n=>{const d=findDupCodes([n].filter(Boolean));return d?d.it:null};
 
 /* ---------- liste ---------- */

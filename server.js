@@ -65,7 +65,10 @@ const clean = (v, max = 300) => String(v ?? '').trim().slice(0, max);
 // clés de comparaison : GL692682820JB → aussi GL692682820 (le code-barres l'embarque souvent sans le suffixe)
 const keysOf = c => { const k = numKey(c); const out = [k]; const m = k.match(/^([A-Z]{2}\d{9})[A-Z]{2}$/); if (m) out.push(m[1]); return out.filter(x => x.length >= 4); };
 const memeColis = (a, b) => { for (const x of keysOf(a)) for (const y of keysOf(b)) { if (x === y) return true; if (x.length >= 10 && y.length >= 10 && (x.includes(y) || y.includes(x))) return true; } return false; };
-const codesOf = c => (c.codes && c.codes.length ? c.codes : [c.numero]).filter(Boolean);
+// seuls les vrais numéros de colis servent aux doublons : mélange lettres+chiffres ≥ 10 car., ou ≥ 12 chiffres
+// (on ignore les réf. client / commande courtes qui peuvent être communes à plusieurs colis)
+const suivi = c => { const k = numKey(c); return (/[A-Z]/.test(k) && /\d{6}/.test(k) && k.length >= 10) || /^\d{12,}$/.test(k); };
+const codesOf = c => [...new Set([c.numero, ...(c.codes || [])].filter(Boolean))].filter((x, i) => i === 0 || suivi(x));
 
 // ---------- helpers HTTP ----------
 function send(res, code, obj, headers = {}) {
@@ -198,7 +201,7 @@ const server = http.createServer(async (req, res) => {
         codes = [...new Set(codes)].slice(0, 20);
         if (!codes.length) return send(res, 400, { error: 'numéro manquant' });
         for (const c of colis) {
-          for (const x of codesOf(c)) { const hit = codes.find(y => memeColis(x, y)); if (hit) return send(res, 409, { error: 'doublon', existing: c, code: x }); }
+          for (const x of codesOf(c)) { const hit = codes.filter((y, i) => i === 0 || suivi(y)).find(y => memeColis(x, y)); if (hit) return send(res, 409, { error: 'doublon', existing: c, code: x }); }
         }
         const it = {
           id: crypto.randomBytes(8).toString('hex'), numero: numero || codes[0], codes, numKey: numKey(numero || codes[0]),
