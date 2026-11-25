@@ -62,6 +62,12 @@ cd ~/qr-code && git pull && pm2 restart qr-code
 
 Le dossier `data/` n'est pas suivi par git, donc une mise à jour ne l'efface jamais.
 
+## Vider toute la base (avec sauvegarde)
+
+```bash
+cd ~/qr-code && cp data/colis.json data/backups/avant-vidage-$(date +%F-%Hh%M).json && echo '[]' > data/colis.json && pm2 restart qr-code
+```
+
 ## Commandes utiles
 
 ```bash

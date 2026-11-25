@@ -86,6 +86,8 @@ select{font:16px Inter,sans-serif;padding:11px 12px;border:1.5px solid var(--lin
 .alarm.on{display:flex;animation:flash .25s steps(1) 8}
 @keyframes flash{50%{background:#ff2a2a}0%{background:#9a0000}}
 .alarm b{font:800 clamp(30px,9vw,52px)/1.05 Archivo,sans-serif}
+.choix{display:grid;gap:10px;width:100%;max-width:380px;margin-top:6px}
+.choix button{min-height:58px;border-radius:12px;border:0;background:#fff;color:#7a0000;font:700 18px Inter,sans-serif;cursor:pointer}
 .alarm p{margin:0;font-size:17px;max-width:30ch}
 .alarm small{opacity:.85}
 /* connexion */
@@ -140,7 +142,9 @@ select{font:16px Inter,sans-serif;padding:11px 12px;border:1.5px solid var(--lin
 
 <div class="toast" id="toast"><span id="tmsg"></span><button id="undo" type="button">Annuler</button></div>
 <div class="sheet" id="sheet"><div><b>Message à copier</b><textarea id="mtxt" readonly rows="7"></textarea><p class="hint" style="text-align:left">Appui long dans le texte → Tout sélectionner → Copier.</p><button class="btn" id="shClose" type="button">Fermer</button></div></div>
-<div class="alarm" id="alarm" role="alert"><b>PRODUIT DÉJÀ SCANNÉ</b><p id="amsg"></p><small>Touche l'écran pour fermer</small></div>
+<div class="alarm" id="alarm" role="alertdialog" aria-labelledby="atit"><b id="atit">DÉJÀ SCANNÉ</b><p id="amsg"></p>
+  <div class="choix"><button id="chRemis" type="button">✓ Remis à la personne</button><button id="chStock" type="button">📦 Garder en stock</button><button id="chNew" type="button">➕ C'est un nouveau colis</button></div>
+  <button class="link" id="chCancel" type="button" style="color:#fff">Annuler</button></div>
 <div class="login" id="login"><form id="lf"><h2 style="margin-bottom:12px">Scan colis</h2><label>Mot de passe<input id="pw" type="password" autocomplete="current-password" required></label><button class="btn main" type="submit" style="width:100%;margin-top:12px">Entrer</button><div class="status err" id="lerr"></div></form></div>
 
 <script>
@@ -179,23 +183,37 @@ function unlockOne(a){if(unlocked.has(a))return;try{a.muted=true;const p=a.play(
 function unlockAudio(){unlockOne(snd);unlockOne(sndOk)}
 function play(a,ms){a._busy=true;unlocked.add(a);setTimeout(()=>a._busy=false,ms);try{a.muted=false;a.volume=1;a.currentTime=0;const p=a.play();if(p&&p.catch)p.catch(()=>{})}catch(e){}}
 const beepAlarm=()=>play(snd,1600),beepOk=()=>play(sndOk,600);
-function alarm(ex,test,code){
+function alarm(ex,test,code,pending){
+  dupCtx={ex,test,pending};
   const qui=[ex.prenom,(ex.nom||'').toUpperCase()].filter(Boolean).join(' ')||'sans nom';
-  $('amsg').textContent=`${code||ex.numero} — ${qui}. Scanné le ${fmt(ex.ts)}${ex.remisAt?', remis le '+fmt(ex.remisAt):ex.reporteAt?', reporté le '+fmt(ex.reporteAt)+', pas encore remis':', pas encore reporté'}.`;
+  const ou=ex.remisAt?'remis le '+fmt(ex.remisAt):ex.reporteAt?'en stock (reporté le '+fmt(ex.reporteAt)+')':'en stock, pas encore reporté';
+  $('amsg').textContent=`${code||ex.numero} — ${qui}${ex.cie?' · '+cieTxt(ex.cie):''}. Scanné le ${fmt(ex.ts)}, ${ou}.`;
   const a=$('alarm');a.classList.remove('on');void a.offsetWidth;a.classList.add('on');
   beepAlarm();try{navigator.vibrate&&navigator.vibrate([300,100,300,100,300])}catch(e){}
   if(test)return;
-  $('f').reset();$('prev').style.display='none';status('Produit déjà scanné.','err');
+  $('f').reset();$('prev').style.display='none';status('Déjà scanné : choisis quoi faire.','err');
 }
-$('testAlarm').onclick=()=>alarm({numero:'FRTEST',nom:'Test',prenom:'',ts:Date.now()},true);
-$('alarm').onclick=()=>$('alarm').classList.remove('on');
-const keysOf=c=>{const k=numKey(c),o=[k],m=k.match(/^([A-Z]{2}\d{9})[A-Z]{2}$/);if(m)o.push(m[1]);return o.filter(x=>x.length>=4)};
-const memeColis=(a,b)=>{for(const x of keysOf(a))for(const y of keysOf(b)){if(x===y)return true;if(x.length>=10&&y.length>=10&&(x.includes(y)||y.includes(x)))return true}return false};
-const suivi=c=>{const k=numKey(c);return (/[A-Z]/.test(k)&&/\d{6}/.test(k)&&k.length>=10)||/^\d{12,}$/.test(k)};
-const codesOf=i=>[...new Set([i.numero,...(i.codes||[])].filter(Boolean))].filter((x,n)=>n===0||suivi(x));
-let curCodes=[];
-function findDupCodes(list){list=list.filter((x,n)=>n===0||suivi(x));for(const it of items)for(const x of codesOf(it))if(list.some(y=>memeColis(x,y)))return {it,code:x};return null}
-const findDup=n=>{const d=findDupCodes([n].filter(Boolean));return d?d.it:null};
+const closeAlarm=()=>{$('alarm').classList.remove('on');dupCtx=null};
+async function setEtat(it,etat){const j=await api(`/api/colis/${encodeURIComponent(it.id)}/etat`,{method:'POST',body:{etat}});const k=items.findIndex(i=>i.id===j.item.id);if(k>=0)items[k]=j.item;ver=j.version;render();return j.item}
+const nomDe=it=>[(it.nom||'').toUpperCase(),it.prenom].filter(Boolean).join(' ')||it.numero;
+$('chRemis').onclick=async()=>{const c=dupCtx;closeAlarm();if(!c||c.test)return;try{await setEtat(c.ex,'remis');status('Remis à '+nomDe(c.ex)+' · '+fmt(Date.now())+'.','ok');beepOk()}catch(e){status('Échec, réessaie.','err')}};
+$('chStock').onclick=async()=>{const c=dupCtx;closeAlarm();if(!c||c.test)return;try{if(c.ex.etat==='remis')await setEtat(c.ex,'reporte');status(nomDe(c.ex)+' : gardé en stock.','ok')}catch(e){status('Échec, réessaie.','err')}};
+$('chNew').onclick=async()=>{const c=dupCtx;closeAlarm();if(!c||c.test||!c.pending)return;const it=await postColis(c.pending,true,false);if(it)beepOk()};
+$('chCancel').onclick=closeAlarm;
+const norm=c=>String(c||'').toUpperCase().replace(/[^A-Z0-9]/g,'');
+function trackKey(c){const k=norm(c);let m;
+  if(/^FR\d{10}$/.test(k))return k;
+  if((m=k.match(/^\d{0,2}(\d[A-Z]\d{11})$/)))return m[1];
+  if(/^[A-Z]{2}\d{9}[A-Z]{2}$/.test(k))return k;
+  if(/^1Z[A-Z0-9]{16}$/.test(k))return k;
+  if(/^\d{12,22}$/.test(k))return k;
+  return null}
+function keysFor(numero,codes){const s=new Set(),m=norm(numero);if(m){let t=trackKey(m);if(!t&&/^\d{10}$/.test(m))t='FR'+m;s.add(t||m)}for(const c of codes||[]){const t=trackKey(c);if(t)s.add(t)}return s}
+const memeColis=(a,b)=>{const A=keysFor(a,[]);for(const k of keysFor(b,[]))if(A.has(k))return true;return false};
+const codesOf=i=>[i.numero,...(i.codes||[])].filter(Boolean);
+let curCodes=[],dupCtx=null;
+function findDupKeys(numero,codes){const mine=keysFor(numero,codes);if(!mine.size)return null;for(const it of items)for(const k of keysFor(it.numero,it.codes))if(mine.has(k))return {it,code:k};return null}
+const findDup=n=>{const d=findDupKeys(n,[]);return d?d.it:null};
 
 /* ---------- liste ---------- */
 function msgOf(i){
@@ -320,7 +338,7 @@ async function applyLab(lab){
   const codes=lab.codes||[num].filter(Boolean);
   if(num&&$('num').value.trim()&&!memeColis($('num').value,num)){$('f').reset();setType('C');curCodes=[]} // autre colis
   await refresh();
-  const d=findDupCodes(codes);if(d){alarm(d.it,false,d.code);curCodes=[];return 'dup'}
+  const d=findDupKeys(num,codes);if(d){alarm(d.it,false,d.code,{numero:num,codes,type:lab.type,cie:(String(lab.cie||'').match(/[1-7]/)||[''])[0],nom:lab.nom,prenom:lab.prenom,produit:lab.produit,tel:lab.tel,infos:lab.infos,obs:''});curCodes=[];return 'dup'}
   curCodes=[...new Set([...curCodes,...codes])];
   const set=(id,v)=>{v=String(v||'').trim();if(v&&!$(id).value.trim())$(id).value=v};
   set('num',num);set('prod',lab.produit);set('nom',lab.nom);set('prenom',lab.prenom);set('tel',lab.tel);set('infos',lab.infos);
@@ -391,16 +409,21 @@ document.addEventListener('visibilitychange',()=>{if(document.hidden&&stream)sto
 
 $('num').addEventListener('change',()=>{const d=findDup($('num').value);if(d){unlockAudio();alarm(d)}});
 
-async function saveCurrent(auto){
-  const numero=$('num').value.trim().replace(/\s+/g,'');if(!numero){$('num').focus();return null}
-  const all=[...new Set([numero,...curCodes])];const d=findDupCodes(all);if(d){alarm(d.it,false,d.code);return null}
+function formPayload(){const numero=$('num').value.trim().replace(/\s+/g,'');
+  return {numero,codes:[...new Set([numero,...curCodes])],produit:$('prod').value,nom:$('nom').value,prenom:$('prenom').value,tel:$('tel').value,infos:$('infos').value,obs:$('obs').value,cie:$('cie').value,type:ctype}}
+async function postColis(pl,force,auto){
   try{
-    const j=await api('/api/colis',{method:'POST',body:{numero,codes:all,produit:$('prod').value,nom:$('nom').value,prenom:$('prenom').value,tel:$('tel').value,infos:$('infos').value,obs:$('obs').value,cie:$('cie').value,type:ctype,vaguemestre:SIGN}});
+    const j=await api('/api/colis',{method:'POST',body:{...pl,vaguemestre:SIGN,force:!!force}});
     items.push(j.item);ver=j.version;render();curCodes=[];
     $('f').reset();setType('C');$('prev').style.display='none';$('rawBox').style.display='none';
-    status((auto?'Enregistré automatiquement : ':'Enregistré : ')+[(j.item.nom||'').toUpperCase(),j.item.prenom].filter(Boolean).join(' ')+' · '+fmt(j.item.ts)+'.','ok');
+    status((auto?'Enregistré automatiquement : ':'Enregistré : ')+([(j.item.nom||'').toUpperCase(),j.item.prenom].filter(Boolean).join(' ')||j.item.numero)+' · '+fmt(j.item.ts)+'.','ok');
     return j.item;
-  }catch(err){if(err.status===409&&err.existing){alarm(err.existing,false,err.code);curCodes=[]}else if(err.status!==401)status('Échec de l\'enregistrement, réessaie.','err');return null}
+  }catch(err){if(err.status===409&&err.existing){alarm(err.existing,false,err.code,pl);curCodes=[]}else if(err.status!==401)status('Échec de l\'enregistrement, réessaie.','err');return null}
+}
+async function saveCurrent(auto){
+  const pl=formPayload();if(!pl.numero){$('num').focus();return null}
+  const d=findDupKeys(pl.numero,pl.codes);if(d){alarm(d.it,false,d.code,pl);return null}
+  return postColis(pl,false,auto);
 }
 $('f').onsubmit=async e=>{e.preventDefault();unlockAudio();const it=await saveCurrent(false);if(it&&stream){armed=false;beepOk();chip('✓ Enregistré · colis suivant')}};
 $('clr').onclick=()=>{setType('C');curCodes=[];$('prev').style.display='none';status('')};

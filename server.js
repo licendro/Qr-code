@@ -62,13 +62,24 @@ function save() {
 // FR1283838 et 1283838 = même colis
 const numKey = n => String(n || '').toUpperCase().replace(/[^A-Z0-9]/g, '').replace(/^FR/, '');
 const clean = (v, max = 300) => String(v ?? '').trim().slice(0, max);
-// clés de comparaison : GL692682820JB → aussi GL692682820 (le code-barres l'embarque souvent sans le suffixe)
-const keysOf = c => { const k = numKey(c); const out = [k]; const m = k.match(/^([A-Z]{2}\d{9})[A-Z]{2}$/); if (m) out.push(m[1]); return out.filter(x => x.length >= 4); };
-const memeColis = (a, b) => { for (const x of keysOf(a)) for (const y of keysOf(b)) { if (x === y) return true; if (x.length >= 10 && y.length >= 10 && (x.includes(y) || y.includes(x))) return true; } return false; };
-// seuls les vrais numéros de colis servent aux doublons : mélange lettres+chiffres ≥ 10 car., ou ≥ 12 chiffres
-// (on ignore les réf. client / commande courtes qui peuvent être communes à plusieurs colis)
-const suivi = c => { const k = numKey(c); return (/[A-Z]/.test(k) && /\d{6}/.test(k) && k.length >= 10) || /^\d{12,}$/.test(k); };
-const codesOf = c => [...new Set([c.numero, ...(c.codes || [])].filter(Boolean))].filter((x, i) => i === 0 || suivi(x));
+// Détection des doublons : uniquement les VRAIS numéros de suivi, reconnus par leur format exact.
+// Les codes de tri (FR-CHR-0436-TOY0, FR-COL-1176-52CHA, 52U60…) et réf. client ne comptent jamais.
+const norm = c => String(c || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+function trackKey(c) {
+  const k = norm(c); let m;
+  if (/^FR\d{10}$/.test(k)) return k;                          // Amazon
+  if ((m = k.match(/^\d{0,2}(\d[A-Z]\d{11})$/))) return m[1];   // Colissimo 6C21339014797 (et 116C… du code-barres)
+  if (/^[A-Z]{2}\d{9}[A-Z]{2}$/.test(k)) return k;               // Chronopost / recommandé / DHL CI…DE
+  if (/^1Z[A-Z0-9]{16}$/.test(k)) return k;                       // UPS
+  if (/^\d{12,22}$/.test(k)) return k;                           // DPD 14 chiffres, SSCC 18 chiffres…
+  return null;
+}
+function keysFor(numero, codes) {
+  const s = new Set(), m = norm(numero);
+  if (m) { let t = trackKey(m); if (!t && /^\d{10}$/.test(m)) t = 'FR' + m; s.add(t || m); }
+  for (const c of codes || []) { const t = trackKey(c); if (t) s.add(t); }
+  return s;
+}
 
 // ---------- helpers HTTP ----------
 function send(res, code, obj, headers = {}) {
@@ -200,8 +211,9 @@ const server = http.createServer(async (req, res) => {
         let codes = [numero, ...(Array.isArray(b.codes) ? b.codes : [])].map(c => clean(c, 60).replace(/[\s-]+/g, '').toUpperCase()).filter(c => numKey(c).length >= 4);
         codes = [...new Set(codes)].slice(0, 20);
         if (!codes.length) return send(res, 400, { error: 'numéro manquant' });
-        for (const c of colis) {
-          for (const x of codesOf(c)) { const hit = codes.filter((y, i) => i === 0 || suivi(y)).find(y => memeColis(x, y)); if (hit) return send(res, 409, { error: 'doublon', existing: c, code: x }); }
+        if (!b.force) {
+          const mine = keysFor(numero, codes);
+          for (const c of colis) for (const k of keysFor(c.numero, c.codes)) if (mine.has(k)) return send(res, 409, { error: 'doublon', existing: c, code: k });
         }
         const it = {
           id: crypto.randomBytes(8).toString('hex'), numero: numero || codes[0], codes, numKey: numKey(numero || codes[0]),
