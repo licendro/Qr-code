@@ -153,7 +153,7 @@ Extrais :
   • Chronopost : 2 lettres + 9 chiffres + 2 lettres, ex. XN217543973JB, GL692682820JB.
   • DPD : 14 chiffres après « Track », ex. « 1031 4002 0826 30 » → 10314002082630.
   • DHL / Deutsche Post : « Shipment No. », ex. CI161997812DE. UPS : 1Z…. Recommandé : 2 lettres + 9 chiffres + FR.
-- codes : TOUS les autres identifiants du colis visibles (numéros sous les codes-barres, « Track », références d'envoi, SSCC), sans espaces. Le numero y figure aussi.
+- codes : au plus 3 autres identifiants de suivi visibles (numéro sous le code-barres principal, « Track »), sans espaces. Pas de réf. client ni de code de tri.
 - type : « R » si c'est un recommandé (mention recommandé, R1/R2/R3, avis de réception), sinon « C ».
 - nom : NOM de famille du destinataire en MAJUSCULES, sans grade ni civilité (ignore EG, GAV, M., Mme…). Les étiquettes écrivent « NOM Prénom » ou « Prénom NOM » : le nom de famille est souvent en majuscules ; s'il n'y a aucun indice, le prénom est le mot qui est un prénom courant (Antoine, Lila, Ewen, Maxime…).
 - prenom : prénom du destinataire (Première lettre en majuscule).
@@ -175,7 +175,7 @@ async function appelClaude(b64, model) {
       method: 'POST', signal: ctl.signal,
       headers: { 'x-api-key': API_KEY, 'anthropic-version': '2023-06-01', 'content-type': 'application/json', ...(WORKSPACE ? { 'anthropic-workspace-id': WORKSPACE } : {}) },
       body: JSON.stringify({
-        model, max_tokens: 600,
+        model, max_tokens: 350,
         // consignes fixes en « system » + cache : quand tu scannes plusieurs colis d'affilée, ce long texte coûte ~10× moins cher
         system: [{ type: 'text', text: PROMPT, cache_control: { type: 'ephemeral' } }],
         messages: [{ role: 'user', content: [

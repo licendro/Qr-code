@@ -319,14 +319,16 @@ async function lireLocal(im){
   return r;
 }
 async function lire(im){
-  const bcP=codesBarres(im).catch(()=>[]);
+  // 1) codes-barres lus sur le téléphone (gratuit) : si c'est un doublon, pas besoin d'appeler Claude
+  const bc=await Promise.race([codesBarres(im).catch(()=>[]),new Promise(r=>setTimeout(()=>r([]),2500))]);
+  const dupBc=bc.length?findDupKeys('',bc):null;
+  if(dupBc)return {numero:'',codes:bc,_dupBarcode:true};
   let lab=null;
   if(lecture==='claude'){
-    const b64=canvasOf(im,1568).toDataURL('image/jpeg',.9);
+    const b64=canvasOf(im,1400).toDataURL('image/jpeg',.88);
     try{lab=await api('/api/lire',{method:'POST',body:{image:b64}})}catch(e){if(e.status===401)throw e;status('Lecture Claude indisponible'+(e.error?' ('+e.error+')':'')+', lecture du téléphone…','err',true)}
   }
   if(!lab)lab=await lireLocal(im);
-  const bc=await bcP;
   lab.codes=[...new Set([lab.numero,...(lab.codes||[]),...bc].map(cleanCode).filter(c=>c.length>=6))];
   if(!lab.numero&&lab.codes.length)lab.numero=lab.codes[0];
   return lab;
