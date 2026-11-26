@@ -64,10 +64,13 @@ cd ~/qr-code && git pull && pm2 restart qr-code
 
 Le dossier `data/` n'est pas suivi par git, donc une mise à jour ne l'efface jamais.
 
-## Accès payant
+## Crédit prépayé (pas de bénéfice : ça paie seulement l'API)
 
-- Accès = un **code** (XXXX-XXXX), acheté 5 € par carte (Stripe) ou offert par l'admin ; un code = un téléphone.
-- `APP_PASSWORD` = accès **admin illimité**, verrouillé sur le premier téléphone qui s'en sert. Panneau « Codes d'accès » en bas de l'app (créer un code offert, changer de téléphone, désactiver).
+- Chacun paie le montant qu'il veut (2 € minimum) par carte via Stripe Checkout → reçoit un **code** (affiché + écrit sur le reçu Stripe). Un code = un téléphone.
+- Chaque lecture d'étiquette par l'IA retire **5 centimes** du crédit du code ; les doublons repérés par code-barres et la saisie à la main sont gratuits. Bouton « Recharger ».
+- `APP_PASSWORD` = **admin illimité et gratuit**, verrouillé sur le premier téléphone qui s'en sert. Panneau « Codes d'accès » : code offert (2 € de crédit), +2 €, changer de téléphone, désactiver.
+- Le crédit est versé par le **webhook** `checkout.session.completed` / `async_payment_succeeded` (signature vérifiée) et, en secours, par la page de retour (jamais crédité deux fois).
+- Webhook Stripe : `https://colis.jdev-hub.fr/api/stripe-webhook`.
 - Changer le téléphone admin : `cd ~/qr-code && node -e "const f='data/acces.json',a=require('./'+f);a.adminDevice=null;require('fs').writeFileSync(f,JSON.stringify(a,null,1))" && pm2 restart qr-code`
 
 ## Vider toute la base (avec sauvegarde)

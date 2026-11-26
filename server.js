@@ -54,10 +54,35 @@ const saveSessions = () => writeJson(SESS_FILE, sessions);
 const ACCES_FILE = path.join(DATA, 'acces.json');
 let acces = readJson(ACCES_FILE, { codes: {}, adminDevice: null, sessionsStripe: {} });
 const saveAcces = () => writeJson(ACCES_FILE, acces);
-const PRIX_CENTIMES = Number(process.env.PRIX_CENTIMES) || 500;
-const STRIPE_KEY = process.env.STRIPE_SECRET_KEY || '';
+const PRIX_SCAN = Number(process.env.PRIX_SCAN_CENTIMES) || 5;        // 5 centimes par lecture IA
+const MIN_RECHARGE = Number(process.env.MIN_RECHARGE_CENTIMES) || 200;  // 2 € minimum, montant libre au-dessus
+const MAX_RECHARGE = 10000;
+const CREDIT_OFFERT = Number(process.env.CREDIT_OFFERT_CENTIMES) || 200; // crédit d'un code offert par l'admin
+acces.credite = acces.credite || {};
+const STRIPE_KEY = process.env.STRIPE_SECRET_KEY || process.env.STRIPE_RESTRICTED_KEY || '';
+const STRIPE_WHSEC = process.env.STRIPE_WEBHOOK_SECRET || '';
 const BASE_URL = (process.env.BASE_URL || '').replace(/\/$/, '');
 function nouveauCode() { const A = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'; let c; do { c = Array.from(crypto.randomBytes(8), b => A[b % A.length]).join(''); c = c.slice(0, 4) + '-' + c.slice(4); } while (acces.codes[c]); return c; }
+// active le code réservé pour une session Checkout payée (appelé par le webhook ET par la page de retour : idempotent)
+function activerCodeSession(cs) {
+  if (!cs || cs.payment_status === 'unpaid') return null;
+  let code = acces.sessionsStripe[cs.id] || cs.metadata?.code;
+  if (!code) return null;
+  const c = acces.codes[code] || (acces.codes[code] = { cree: Date.now(), source: 'stripe' });
+  c.actif = true; c.enAttente = false; c.email = cs.customer_details?.email || c.email || '';
+  if (!acces.credite[cs.id]) { acces.credite[cs.id] = true; c.solde = (c.solde || 0) + (cs.amount_total || 0); c.verse = (c.verse || 0) + (cs.amount_total || 0); c.dernierPaiement = Date.now(); }
+  acces.sessionsStripe[cs.id] = code; saveAcces();
+  return code;
+}
+// vérification de la signature Stripe-Signature (t=…,v1=…) — HMAC SHA-256 de « t.payload » avec le secret whsec_
+function signatureStripeOk(raw, header) {
+  if (!STRIPE_WHSEC || !header) return false;
+  const parts = Object.fromEntries(String(header).split(',').map(x => x.split('=')).filter(x => x.length === 2).map(([k, v]) => [k.trim(), v]));
+  const sigs = String(header).split(',').filter(x => x.startsWith('v1=')).map(x => x.slice(3));
+  const t = Number(parts.t); if (!t || Math.abs(Date.now() / 1000 - t) > 300) return false;
+  const attendu = crypto.createHmac('sha256', STRIPE_WHSEC).update(t + '.' + raw).digest('hex');
+  return sigs.some(v => v.length === attendu.length && crypto.timingSafeEqual(Buffer.from(v), Buffer.from(attendu)));
+}
 async function stripe(method, chemin, form) {
   const r = await fetch((process.env.STRIPE_API_BASE || 'https://api.stripe.com') + '/v1' + chemin, { method, headers: { Authorization: 'Bearer ' + STRIPE_KEY, ...(form ? { 'Content-Type': 'application/x-www-form-urlencoded' } : {}) }, body: form ? new URLSearchParams(form).toString() : undefined });
   const j = await r.json(); if (!r.ok) throw new Error(j?.error?.message || 'Stripe ' + r.status); return j;
@@ -298,23 +323,41 @@ const server = http.createServer(async (req, res) => {
     // ----- paiement Stripe : 5 € → un code -----
     if (p === '/api/payer' && req.method === 'POST') {
       if (!STRIPE_KEY) return send(res, 501, { error: 'Paiement en ligne pas encore activé : demande un code au vaguemestre.' });
+      const b = await readBody(req, 2000);
+      const montant = Math.round(Number(b.montant) * 100);
+      if (!(montant >= MIN_RECHARGE && montant <= MAX_RECHARGE)) return send(res, 400, { error: `Montant entre ${MIN_RECHARGE / 100} € et ${MAX_RECHARGE / 100} €` });
+      const ss = sessionDe(req);
+      let code = ss && ss.role === 'user' ? ss.code : null;                       // recharge de son propre code
+      if (!code) { code = nouveauCode(); acces.codes[code] = { actif: false, cree: Date.now(), source: 'stripe', enAttente: true, solde: 0 }; saveAcces(); }
       const base = BASE_URL || ((isHttps(req) ? 'https://' : 'http://') + req.headers.host);
       const cs = await stripe('POST', '/checkout/sessions', {
+        'metadata[code]': code, 'payment_intent_data[metadata][code]': code,
+        'payment_intent_data[description]': `Crédit Scan colis (${Math.floor(montant / PRIX_SCAN)} scans) — ton code : ${code}`, // visible sur le reçu Stripe
         mode: 'payment', 'line_items[0][quantity]': '1', 'line_items[0][price_data][currency]': 'eur',
-        'line_items[0][price_data][unit_amount]': String(PRIX_CENTIMES), 'line_items[0][price_data][product_data][name]': 'Accès Scan colis',
+        'line_items[0][price_data][unit_amount]': String(montant),
+        'line_items[0][price_data][product_data][name]': 'Crédit Scan colis',
+        'line_items[0][price_data][product_data][description]': `${Math.floor(montant / PRIX_SCAN)} lectures d'étiquettes à ${PRIX_SCAN} centimes — sert uniquement à payer l'IA`,
         success_url: base + '/?paye={CHECKOUT_SESSION_ID}', cancel_url: base + '/'
       });
       return send(res, 200, { url: cs.url });
     }
+    if (p === '/api/stripe-webhook' && req.method === 'POST') {
+      const raw = await new Promise((ok, ko) => { const ch = []; let n = 0; req.on('data', c => { n += c.length; if (n > 1e6) req.destroy(); else ch.push(c); }); req.on('end', () => ok(Buffer.concat(ch).toString('utf8'))); req.on('error', ko); });
+      if (!signatureStripeOk(raw, req.headers['stripe-signature'])) return send(res, 400, { error: 'signature invalide' });
+      const ev = JSON.parse(raw), obj = ev.data && ev.data.object;
+      if (ev.type === 'checkout.session.completed' || ev.type === 'checkout.session.async_payment_succeeded') { const code = activerCodeSession(obj); if (code) console.log('paiement reçu → code', code); }
+      if (ev.type === 'checkout.session.async_payment_failed') console.log('paiement échoué', obj && obj.id);
+      return send(res, 200, { received: true });
+    }
     if (p === '/api/code-paye' && req.method === 'POST') {
       const b = await readBody(req, 2000); const id = String(b.session || '');
       if (!STRIPE_KEY || !/^cs_[A-Za-z0-9_]+$/.test(id)) return send(res, 400, { error: 'paiement inconnu' });
-      if (acces.sessionsStripe[id]) return send(res, 200, { code: acces.sessionsStripe[id] });
+      const dejaActif = acces.sessionsStripe[id] && acces.codes[acces.sessionsStripe[id]]?.actif;
+      if (dejaActif && acces.credite[id]) return send(res, 200, { code: acces.sessionsStripe[id], solde: acces.codes[acces.sessionsStripe[id]].solde || 0 });
       const cs = await stripe('GET', '/checkout/sessions/' + encodeURIComponent(id));
-      if (cs.payment_status !== 'paid') return send(res, 402, { error: 'Paiement non confirmé' });
-      const code = nouveauCode(); acces.codes[code] = { actif: true, cree: Date.now(), source: 'stripe', session: id, email: cs.customer_details?.email || '' };
-      acces.sessionsStripe[id] = code; saveAcces();
-      return send(res, 200, { code });
+      const code = activerCodeSession(cs);
+      if (!code) return send(res, 402, { error: 'Paiement pas encore confirmé, réessaie dans un instant' });
+      return send(res, 200, { code, solde: acces.codes[code].solde || 0 });
     }
     if (p.startsWith('/api/')) {
       if (!authed(req)) return send(res, 401, { error: 'non connecté' });
@@ -323,15 +366,15 @@ const server = http.createServer(async (req, res) => {
         delete sessions[cookies(req).sid]; saveSessions();
         return send(res, 200, { ok: true }, { 'Set-Cookie': 'sid=; Path=/; Max-Age=0' });
       }
-      if (p === '/api/me') return send(res, 200, { ok: true, role: sessionDe(req).role, lecture: API_KEY ? 'claude' : 'locale', signature: SIGNATURE, appris: Object.keys(learn.personnes).length, corrections: learn.corrections.length, stats: learn.stats });
+      if (p === '/api/me') { const ss = sessionDe(req), cc = ss.code ? acces.codes[ss.code] : null; return send(res, 200, { ok: true, role: ss.role, code: ss.code || null, solde: cc ? cc.solde || 0 : null, prixScan: PRIX_SCAN, minRecharge: MIN_RECHARGE, lecture: API_KEY ? 'claude' : 'locale', signature: SIGNATURE, appris: Object.keys(learn.personnes).length, corrections: learn.corrections.length, stats: learn.stats }); }
 
       if (p.startsWith('/api/admin/')) {
         if (sessionDe(req).role !== 'admin') return send(res, 403, { error: 'réservé à l\'admin' });
-        if (p === '/api/admin/codes' && req.method === 'GET') return send(res, 200, { codes: acces.codes, stripe: !!STRIPE_KEY, prix: PRIX_CENTIMES });
-        if (p === '/api/admin/codes' && req.method === 'POST') { const code = nouveauCode(); acces.codes[code] = { actif: true, cree: Date.now(), source: 'offert' }; saveAcces(); return send(res, 200, { code }); }
-        const m2 = p.match(/^\/api\/admin\/codes\/([A-Z0-9-]{9})\/(liberer|desactiver|activer)$/);
+        if (p === '/api/admin/codes' && req.method === 'GET') return send(res, 200, { codes: acces.codes, stripe: !!STRIPE_KEY, prixScan: PRIX_SCAN });
+        if (p === '/api/admin/codes' && req.method === 'POST') { const code = nouveauCode(); acces.codes[code] = { actif: true, cree: Date.now(), source: 'offert', solde: CREDIT_OFFERT }; saveAcces(); return send(res, 200, { code }); }
+        const m2 = p.match(/^\/api\/admin\/codes\/([A-Z0-9-]{9})\/(liberer|desactiver|activer|crediter)$/);
         if (m2 && req.method === 'POST') { const c = acces.codes[m2[1]]; if (!c) return send(res, 404, { error: 'code inconnu' });
-          if (m2[2] === 'liberer') c.device = null; else c.actif = m2[2] === 'activer';
+          if (m2[2] === 'liberer') c.device = null; else if (m2[2] === 'crediter') c.solde = (c.solde || 0) + 200; else c.actif = m2[2] === 'activer';
           if (!c.actif) for (const [sid, ss] of Object.entries(sessions)) if (ss.code === m2[1]) delete sessions[sid];
           saveAcces(); saveSessions(); return send(res, 200, { ok: true }); }
         return send(res, 404, { error: 'route inconnue' });
@@ -391,10 +434,16 @@ const server = http.createServer(async (req, res) => {
       }
       if (p === '/api/lire' && req.method === 'POST') {
         if (!API_KEY) return send(res, 501, { error: 'pas de clé API' });
+        const ss = sessionDe(req), cc = ss.role === 'user' ? acces.codes[ss.code] : null;
+        if (cc && (cc.solde || 0) < PRIX_SCAN) return send(res, 402, { error: 'credit', solde: cc.solde || 0 });
         const b = await readBody(req);
         const b64 = String(b.image || '').replace(/^data:image\/\w+;base64,/, '');
         if (!b64) return send(res, 400, { error: 'image manquante' });
-        try { return send(res, 200, await lireEtiquette(b64)); }
+        try {
+          const out = await lireEtiquette(b64);
+          if (cc) { cc.solde = (cc.solde || 0) - PRIX_SCAN; cc.scans = (cc.scans || 0) + 1; saveAcces(); out.solde = cc.solde; }
+          return send(res, 200, out);
+        }
         catch (e) { console.error('lecture:', e.message); return send(res, 502, { error: e.message }); }
       }
       return send(res, 404, { error: 'route inconnue' });

@@ -99,6 +99,7 @@ select{font:16px Inter,sans-serif;padding:11px 12px;border:1.5px solid var(--lin
 <div class="wrap">
   <div class="top"><h1>Scan colis</h1><button class="link" id="logout" type="button">Déconnexion</button></div>
   <p class="sub">Photo de l'étiquette → infos remplies → reporté au registre → remis.</p>
+  <div id="creditBar" hidden style="display:flex;justify-content:space-between;align-items:center;gap:10px;background:var(--card);border-radius:12px;padding:8px 8px 8px 14px;margin-bottom:12px"><span id="creditTxt"></span><button class="btn" id="rechargeBtn" type="button" style="min-height:40px">Recharger</button></div>
 
   <section class="label">
     <button class="scan" id="scanBtn" type="button" style="display:flex">
@@ -154,8 +155,10 @@ select{font:16px Inter,sans-serif;padding:11px 12px;border:1.5px solid var(--lin
   <label>Code d'accès<input id="pw" type="password" autocomplete="current-password" autocapitalize="characters" placeholder="XXXX-XXXX" required></label>
   <button class="btn main" type="submit" style="width:100%;margin-top:12px">Entrer</button>
   <div class="status err" id="lerr"></div>
-  <button class="btn" type="button" id="buyBtn" style="width:100%;margin-top:14px">Pas de code ? Acheter l'accès (5 €)</button>
-  <p class="hint" style="margin-top:6px">Paiement sécurisé par carte (Stripe). Un code = un téléphone, accès illimité.</p></form></div>
+  <div style="margin-top:16px;border-top:1px solid var(--line);padding-top:14px"><b>Pas de code ?</b>
+  <p class="hint" style="text-align:left;margin:4px 0 8px">L'app est gratuite : tu paies seulement la lecture des étiquettes par l'IA, 5 centimes par scan, sans bénéfice. Mets le montant que tu veux (2 € minimum).</p>
+  <div style="display:flex;gap:8px"><input id="montant" type="number" inputmode="decimal" min="2" step="0.5" value="5" aria-label="Montant en euros" style="max-width:110px"><button class="btn" type="button" id="buyBtn" style="flex:1">Payer et obtenir mon code</button></div>
+  <p class="hint" id="montantInfo" style="margin-top:6px"></p></div></form></div>
 
 <script>
 {
@@ -336,7 +339,7 @@ async function lire(im){
   let lab=null;
   if(lecture==='claude'){
     const b64=canvasOf(im,1400).toDataURL('image/jpeg',.88);
-    try{lab=await api('/api/lire',{method:'POST',body:{image:b64}})}catch(e){if(e.status===401)throw e;status('Lecture Claude indisponible'+(e.error?' ('+e.error+')':'')+', lecture du téléphone…','err',true)}
+    try{lab=await api('/api/lire',{method:'POST',body:{image:b64}});if(lab.solde!==undefined)majCredit(lab.solde)}catch(e){if(e.status===401)throw e;if(e.status===402){majCredit(e.solde||0);throw {credit:true}}status('Lecture Claude indisponible'+(e.error?' ('+e.error+')':'')+', lecture du téléphone…','err',true)}
   }
   if(!lab)lab=await lireLocal(im);
   lab.codes=[...new Set([lab.numero,...(lab.codes||[]),...bc].map(cleanCode).filter(c=>c.length>=6))];
@@ -370,7 +373,7 @@ $('cam').onchange=async e=>{
   status(lecture==='claude'?'Analyse de l\'étiquette… (quelques secondes)':'Analyse de l\'étiquette (10 à 20 s)…','',true);
   let im,u;try{({im,u}=await loadImg(file))}catch(err){status('Photo illisible, réessaie.','err');return}
   $('prev').src=u;$('prev').style.display='block';
-  let lab;try{lab=await lire(im)}catch(err){status('Étiquette pas lue, reprends la photo ou tape les infos.','err');$('num').focus();return}
+  let lab;try{lab=await lire(im)}catch(err){if(err&&err.credit){status('Crédit épuisé : appuie sur « Recharger » (2 € minimum) ou tape les infos à la main.','err');return}status('Étiquette pas lue, reprends la photo ou tape les infos.','err');$('num').focus();return}
   if(lab.illisible&&!lab.numero){status('Photo trop floue ou étiquette coupée : reprends-la plus près, bien à plat.','err');return}
   const r=await applyLab(lab);if(r==='dup')return;
   if(r==='complet'){const lu=lastLu,codes=curCodes.slice();const it=await saveCurrent(true);if(it){beepOk();offerUndo(it,lu,codes)}return}
@@ -442,23 +445,35 @@ function showLogin(){$('login').style.display='flex';setTimeout(()=>$('pw').focu
 $('lf').onsubmit=async e=>{e.preventDefault();$('lerr').textContent='';
   try{await api('/api/login',{method:'POST',body:{password:$('pw').value,device:DEVICE}});$('pw').value='';$('codeBox').style.display='none';$('login').style.display='none';start()}
   catch(err){$('lerr').textContent=err.error||'Erreur de connexion'}};
-$('buyBtn').onclick=async()=>{$('lerr').textContent='';$('buyBtn').disabled=true;
-  try{const j=await api('/api/payer',{method:'POST'});location.href=j.url}catch(err){$('lerr').textContent=err.error||'Paiement indisponible';$('buyBtn').disabled=false}};
+const euros=c=>(c/100).toFixed(2).replace('.',',')+' €';let PRIX_SCAN=5,SOLDE=null;
+const majMontant=()=>{const m=parseFloat(String($('montant').value).replace(',','.'))||0;$('montantInfo').textContent=m>=2?`= ${Math.floor(m*100/PRIX_SCAN)} scans d'étiquettes`:'Minimum 2 €'};
+$('montant').oninput=majMontant;majMontant();
+async function payer(m){const j=await api('/api/payer',{method:'POST',body:{montant:m}});location.href=j.url}
+$('buyBtn').onclick=async()=>{$('lerr').textContent='';const m=parseFloat(String($('montant').value).replace(',','.'));if(!(m>=2))return $('lerr').textContent='Minimum 2 €';$('buyBtn').disabled=true;
+  try{await payer(m)}catch(err){$('lerr').textContent=err.error||'Paiement indisponible';$('buyBtn').disabled=false}};
+$('rechargeBtn').onclick=async()=>{const r=prompt('Montant à recharger en euros (2 € minimum) :','5');if(r===null)return;const m=parseFloat(String(r).replace(',','.'));if(!(m>=2))return status('Minimum 2 €.','err');
+  try{await payer(m)}catch(err){status(err.error||'Paiement indisponible','err')}};
+function majCredit(solde){if(solde===null||solde===undefined)return;SOLDE=solde;$('creditBar').hidden=false;$('creditBar').style.display='flex';
+  $('creditTxt').innerHTML='';const b=document.createElement('b');b.textContent='Crédit : '+euros(solde);$('creditTxt').append(b,` · ${Math.max(0,Math.floor(solde/PRIX_SCAN))} scans restants`);
+  $('creditBar').style.outline=solde<PRIX_SCAN*10?'2px solid var(--acc)':''}
 $('logout').onclick=async()=>{try{await api('/api/logout',{method:'POST'})}catch(e){}items=[];ver=0;render();showLogin()};
 // retour du paiement Stripe : on récupère le code et on connecte
 (async()=>{const id=new URLSearchParams(location.search).get('paye');if(!id)return;history.replaceState(null,'','/');
-  try{const j=await api('/api/code-paye',{method:'POST',body:{session:id}});$('codeVal').textContent=j.code;$('codeBox').style.display='block';$('pw').value=j.code;showLogin()}
+  try{const j=await api('/api/code-paye',{method:'POST',body:{session:id}});
+    let connecte=false;try{const me=await api('/api/me');connecte=me.code===j.code}catch(e){}
+    if(connecte){majCredit(j.solde);status('✓ Crédit rechargé : '+euros(j.solde)+' disponibles.','ok');return}
+    $('codeVal').textContent=j.code;$('codeBox').style.display='block';$('pw').value=j.code;showLogin()}
   catch(err){showLogin();$('lerr').textContent=err.error||'Paiement non retrouvé'}})();
 // admin : gestion des codes
-async function loadCodes(){try{const j=await api('/api/admin/codes');const L=Object.entries(j.codes).sort((a,b)=>b[1].cree-a[1].cree);
-  $('codesList').innerHTML=L.length?L.map(([c,v])=>`<li class="item" style="grid-template-columns:minmax(0,1fr) auto"><div><b style="font:800 17px Archivo">${esc(c)}</b> <span class="pr">${v.source==='stripe'?'payé 5 €':'offert'}${v.email?' · '+esc(v.email):''}</span><div class="dt">${v.actif?(v.device?'utilisé sur un téléphone':'pas encore utilisé'):'désactivé'} · ${esc(fmt(v.cree))}</div></div>
-    <div style="display:grid;gap:6px">${v.device?`<button class="cp" data-c="${esc(c)}" data-a="liberer" type="button">Changer de tél.</button>`:''}<button class="cp" data-c="${esc(c)}" data-a="${v.actif?'desactiver':'activer'}" type="button">${v.actif?'Désactiver':'Réactiver'}</button></div></li>`).join(''):'<li class="empty">Aucun code pour l\'instant.</li>'}catch(e){}}
+async function loadCodes(){try{const j=await api('/api/admin/codes');const L=Object.entries(j.codes).filter(([c,v])=>!v.enAttente).sort((a,b)=>b[1].cree-a[1].cree);
+  $('codesList').innerHTML=L.length?L.map(([c,v])=>`<li class="item" style="grid-template-columns:minmax(0,1fr) auto"><div><b style="font:800 17px Archivo">${esc(c)}</b> <span class="pr">${v.source==='stripe'?'versé '+euros(v.verse||0):'offert'} · crédit ${euros(v.solde||0)} · ${v.scans||0} scans${v.email?' · '+esc(v.email):''}</span><div class="dt">${v.actif?(v.device?'utilisé sur un téléphone':'pas encore utilisé'):'désactivé'} · ${esc(fmt(v.cree))}</div></div>
+    <div style="display:grid;gap:6px">${v.device?`<button class="cp" data-c="${esc(c)}" data-a="liberer" type="button">Changer de tél.</button>`:''}<button class="cp" data-c="${esc(c)}" data-a="crediter" type="button">+2 €</button><button class="cp" data-c="${esc(c)}" data-a="${v.actif?'desactiver':'activer'}" type="button">${v.actif?'Désactiver':'Réactiver'}</button></div></li>`).join(''):'<li class="empty">Aucun code pour l\'instant.</li>'}catch(e){}}
 $('newCode').onclick=async()=>{try{const j=await api('/api/admin/codes',{method:'POST'});await loadCodes();status('Code créé : '+j.code,'ok')}catch(e){}};
 $('codesList').onclick=async e=>{const b=e.target.closest('button[data-a]');if(!b)return;try{await api(`/api/admin/codes/${b.dataset.c}/${b.dataset.a}`,{method:'POST'});loadCodes()}catch(err){}};
 
 let poll=null;
 async function start(){
-  try{const me=await api('/api/me');lecture=me.lecture;$('adminBox').hidden=me.role!=='admin';$('learnNote').hidden=me.role!=='admin';if(me.role==='admin')loadCodes();if(me.stats)$('learnNote').textContent=`Apprentissage : ${me.appris} personnes connues · ${me.corrections} corrections retenues · ${me.stats.lectures} lectures${me.stats.cacheLu?` · cache : ${Math.round(me.stats.cacheLu/((me.stats.cacheLu+(me.stats.cacheEcrit||0))||1)*100)} % des consignes relues à prix réduit`:''}`;SIGN=me.signature||SIGN;$('vg').textContent='Vaguemestre : '+SIGN+' · date et heure de réception automatiques'}catch(e){return}
+  try{const me=await api('/api/me');lecture=me.lecture;PRIX_SCAN=me.prixScan||5;if(me.role==='user')majCredit(me.solde);else{$('creditBar').hidden=true;$('creditBar').style.display='none'}$('adminBox').hidden=me.role!=='admin';$('learnNote').hidden=me.role!=='admin';if(me.role==='admin')loadCodes();if(me.stats)$('learnNote').textContent=`Apprentissage : ${me.appris} personnes connues · ${me.corrections} corrections retenues · ${me.stats.lectures} lectures${me.stats.cacheLu?` · cache : ${Math.round(me.stats.cacheLu/((me.stats.cacheLu+(me.stats.cacheEcrit||0))||1)*100)} % des consignes relues à prix réduit`:''}`;SIGN=me.signature||SIGN;$('vg').textContent='Vaguemestre : '+SIGN+' · date et heure de réception automatiques'}catch(e){return}
   await refresh();clearInterval(poll);poll=setInterval(refresh,4000);loadZX().catch(()=>{});
 }
 document.addEventListener('touchend',unlockAudio,{once:true});document.addEventListener('click',unlockAudio,{once:true});
