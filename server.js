@@ -177,7 +177,7 @@ async function appelClaude(b64, model) {
       body: JSON.stringify({
         model, max_tokens: 350,
         // consignes fixes en « system » + cache : quand tu scannes plusieurs colis d'affilée, ce long texte coûte ~10× moins cher
-        system: [{ type: 'text', text: PROMPT, cache_control: { type: 'ephemeral' } }],
+        system: [{ type: 'text', text: PROMPT, cache_control: { type: 'ephemeral', ttl: '1h' } }],
         messages: [{ role: 'user', content: [
           { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: b64 } },
           { type: 'text', text: 'Lis cette étiquette et réponds avec le JSON demandé.' + leconsPourPrompt() }
@@ -186,9 +186,25 @@ async function appelClaude(b64, model) {
     });
     const j = await r.json().catch(() => ({}));
     if (!r.ok) { const e = new Error(j?.error?.message || ('API ' + r.status)); e.status = r.status; throw e; }
+    const u = j.usage || {}; learn.stats.cacheLu = (learn.stats.cacheLu || 0) + (u.cache_read_input_tokens || 0);
+    learn.stats.cacheEcrit = (learn.stats.cacheEcrit || 0) + (u.cache_creation_input_tokens || 0); dernierAppel = Date.now();
     return (j.content || []).map(c => c.text || '').join('');
   } finally { clearTimeout(t); }
 }
+// Maintien du cache (1 h) pendant les heures de service : un mini-appel texte (~0,02 centime) toutes les 50 min
+// évite de réécrire les consignes (≈ 0,8 centime) au premier colis de chaque heure.
+let dernierAppel = 0;
+setInterval(async () => {
+  if (!API_KEY || process.env.CACHE_MAINTIEN === '0') return;
+  const d = new Date(), h = d.getHours(), j = d.getDay();
+  if (j === 0 || h < 7 || h >= 19 || !dernierAppel || Date.now() - dernierAppel < 45 * 60000) return;
+  try {
+    await fetch((process.env.ANTHROPIC_BASE_URL || 'https://api.anthropic.com') + '/v1/messages', { method: 'POST',
+      headers: { 'x-api-key': API_KEY, 'anthropic-version': '2023-06-01', 'content-type': 'application/json', ...(WORKSPACE ? { 'anthropic-workspace-id': WORKSPACE } : {}) },
+      body: JSON.stringify({ model: MODEL, max_tokens: 1, system: [{ type: 'text', text: PROMPT, cache_control: { type: 'ephemeral', ttl: '1h' } }], messages: [{ role: 'user', content: 'ok' }] }) });
+    dernierAppel = Date.now();
+  } catch (e) {}
+}, 5 * 60000);
 
 async function lireAvec(b64, model) {
   let txt, last;

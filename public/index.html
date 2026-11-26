@@ -435,7 +435,7 @@ $('logout').onclick=async()=>{try{await api('/api/logout',{method:'POST'})}catch
 
 let poll=null;
 async function start(){
-  try{const me=await api('/api/me');lecture=me.lecture;if(me.stats)$('learnNote').textContent=`Apprentissage : ${me.appris} personnes connues · ${me.corrections} corrections retenues · ${me.stats.lectures} lectures (${me.stats.sonnet} avec le modèle renforcé)`;SIGN=me.signature||SIGN;$('vg').textContent='Vaguemestre : '+SIGN+' · date et heure de réception automatiques'}catch(e){return}
+  try{const me=await api('/api/me');lecture=me.lecture;if(me.stats)$('learnNote').textContent=`Apprentissage : ${me.appris} personnes connues · ${me.corrections} corrections retenues · ${me.stats.lectures} lectures${me.stats.cacheLu?` · cache : ${Math.round(me.stats.cacheLu/((me.stats.cacheLu+(me.stats.cacheEcrit||0))||1)*100)} % des consignes relues à prix réduit`:''}`;SIGN=me.signature||SIGN;$('vg').textContent='Vaguemestre : '+SIGN+' · date et heure de réception automatiques'}catch(e){return}
   await refresh();clearInterval(poll);poll=setInterval(refresh,4000);loadZX().catch(()=>{});
 }
 document.addEventListener('touchend',unlockAudio,{once:true});document.addEventListener('click',unlockAudio,{once:true});
