@@ -206,6 +206,8 @@ function trackKey(c){const k=norm(c);let m;
   if((m=k.match(/^\d{0,2}(\d[A-Z]\d{11})$/)))return m[1];
   if(/^[A-Z]{2}\d{9}[A-Z]{2}$/.test(k))return k;
   if(/^1Z[A-Z0-9]{16}$/.test(k))return k;
+  if(/^(TBA\d{12}|YT\d{16}|LP\d{14}|JJD\d{16,20})$/.test(k))return k;
+  if((m=k.match(/^(\d{14})[A-Z]$/)))return m[1];
   if(/^\d{12,22}$/.test(k))return k;
   return null}
 function keysFor(numero,codes){const s=new Set(),m=norm(numero);if(m){let t=trackKey(m);if(!t&&/^\d{10}$/.test(m))t='FR'+m;s.add(t||m)}for(const c of codes||[]){const t=trackKey(c);if(t)s.add(t)}return s}

@@ -17,9 +17,10 @@ try {
 const PORT = Number(process.env.PORT) || 3000;
 const PASSWORD = process.env.APP_PASSWORD || '';
 const API_KEY = process.env.ANTHROPIC_API_KEY || '';
-// Économie : Haiku (≈ 20× moins cher) lit d'abord ; Sonnet seulement si Haiku n'a pas trouvé le numéro ou le nom.
-const MODEL = process.env.ANTHROPIC_MODEL || 'claude-haiku-5-5';
-const MODEL_FIABLE = process.env.ANTHROPIC_MODEL_FIABLE || 'claude-sonnet-5-5';
+// Modèle principal (Sonnet par défaut, le plus fiable). Option économie : ANTHROPIC_MODEL=claude-haiku-5-5 et
+// ANTHROPIC_MODEL_FIABLE=claude-sonnet-5-5 → Haiku lit d'abord, Sonnet seulement si la lecture est douteuse.
+const MODEL = process.env.ANTHROPIC_MODEL || 'claude-sonnet-5-5';
+const MODEL_FIABLE = process.env.ANTHROPIC_MODEL_FIABLE || '';
 const WORKSPACE = process.env.ANTHROPIC_WORKSPACE_ID || '';
 const SIGNATURE = process.env.SIGNATURE || 'Julien MERCERON';
 if (!PASSWORD || PASSWORD === 'change-moi') {
@@ -108,24 +109,7 @@ function save() {
 // FR1283838 et 1283838 = même colis
 const numKey = n => String(n || '').toUpperCase().replace(/[^A-Z0-9]/g, '').replace(/^FR/, '');
 const clean = (v, max = 300) => String(v ?? '').trim().slice(0, max);
-// Détection des doublons : uniquement les VRAIS numéros de suivi, reconnus par leur format exact.
-// Les codes de tri (FR-CHR-0436-TOY0, FR-COL-1176-52CHA, 52U60…) et réf. client ne comptent jamais.
-const norm = c => String(c || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
-function trackKey(c) {
-  const k = norm(c); let m;
-  if (/^FR\d{10}$/.test(k)) return k;                          // Amazon
-  if ((m = k.match(/^\d{0,2}(\d[A-Z]\d{11})$/))) return m[1];   // Colissimo 6C21339014797 (et 116C… du code-barres)
-  if (/^[A-Z]{2}\d{9}[A-Z]{2}$/.test(k)) return k;               // Chronopost / recommandé / DHL CI…DE
-  if (/^1Z[A-Z0-9]{16}$/.test(k)) return k;                       // UPS
-  if (/^\d{12,22}$/.test(k)) return k;                           // DPD 14 chiffres, SSCC 18 chiffres…
-  return null;
-}
-function keysFor(numero, codes) {
-  const s = new Set(), m = norm(numero);
-  if (m) { let t = trackKey(m); if (!t && /^\d{10}$/.test(m)) t = 'FR' + m; s.add(t || m); }
-  for (const c of codes || []) { const t = trackKey(c); if (t) s.add(t); }
-  return s;
-}
+const { norm, plainUp, numeroValide, trackKey, keysFor, nomValide, GUIDE, EXEMPLES } = require('./lib/etiquettes');
 
 // ---------- helpers HTTP ----------
 function send(res, code, obj, headers = {}) {
@@ -154,13 +138,9 @@ const isHttps = req => req.headers['x-forwarded-proto'] === 'https';
 // ---------- lecture d'étiquette par Claude (si clé API) ----------
 const PROMPT = `Tu lis la photo d'une étiquette de colis reçue à l'École de gendarmerie de Chaumont (adresse : 1 avenue du 109e RI, 52000 Chaumont).
 IMPORTANT : lis UNIQUEMENT l'étiquette principale, celle qui occupe le centre / la plus grande partie de l'image. Ignore complètement les autres colis, étiquettes, étagères ou papiers visibles autour ou en arrière-plan. Toutes les infos (numéro, nom, compagnie) doivent venir de cette même étiquette.
-Où chercher selon le modèle d'étiquette :
-• Colissimo (logo colissimo, souvent sachet plastique souple) : nom en haut à gauche du bloc destinataire ; numéro après « Num colis : » (6C… / 6A… / 8R…).
-• Amazon (ORY1, DBF1, CYCLE, souvent carton) : nom sur la 1re ligne de l'adresse ; numéro FR… au centre, près du gros carré 2D.
-• Chronopost : nom en haut du bloc « Delivery address » ou après « Ref : » ; numéro XN…JB / GL…JB sous un code-barres.
-• DPD : nom après « Contact » (ignore « M. ») ; numéro après « Track ».
-• DHL / Deutsche Post : nom après « An/To » ; numéro « Shipment No. ».
-Le nom du DESTINATAIRE n'est jamais : l'expéditeur, une ville, une rue, « École de gendarmerie », un service ou un code de tri.
+${GUIDE}
+
+${EXEMPLES}
 
 Extrais :
 
@@ -196,9 +176,11 @@ async function appelClaude(b64, model) {
       headers: { 'x-api-key': API_KEY, 'anthropic-version': '2023-06-01', 'content-type': 'application/json', ...(WORKSPACE ? { 'anthropic-workspace-id': WORKSPACE } : {}) },
       body: JSON.stringify({
         model, max_tokens: 600,
+        // consignes fixes en « system » + cache : quand tu scannes plusieurs colis d'affilée, ce long texte coûte ~10× moins cher
+        system: [{ type: 'text', text: PROMPT, cache_control: { type: 'ephemeral' } }],
         messages: [{ role: 'user', content: [
           { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: b64 } },
-          { type: 'text', text: PROMPT + leconsPourPrompt() }
+          { type: 'text', text: 'Lis cette étiquette et réponds avec le JSON demandé.' + leconsPourPrompt() }
         ] }]
       })
     });
@@ -222,27 +204,6 @@ async function lireAvec(b64, model) {
   return analyser(txt);
 }
 // ---------- contrôle de cohérence : pas de mots au hasard ----------
-const MOTS_INTERDITS = new Set(('CHAUMONT FRANCE ECOLE GENDARMERIE AVENUE AV RUE REGIMENT RGT INFANTERIE RI CIE COMPAGNIE CYCLE DBF ORY LYS COLISSIMO CHRONOPOST AMAZON DPD DHL UPS GLS ' +
-  'LA POSTE PREDICT SIGN DOM CONTACT REF TRACK SERVICE SHIPMENT DELIVERY ADDRESS DESTINATAIRE EXPEDITEUR SENDER COLIS POIDS KG PREMIUM PAKET INTERNATIONAL FR CEDEX BP SECTION BATIMENT').split(' '));
-const plainUp = s => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toUpperCase();
-function nomValide(n) {
-  const t = plainUp(n).trim(); if (!t || /\d/.test(t) || t.length < 2 || t.length > 40) return false;
-  const mots = t.split(/[\s'-]+/).filter(Boolean); if (!mots.length || mots.length > 4) return false;
-  return !mots.every(m => MOTS_INTERDITS.has(m)) && !mots.some(m => ['CHAUMONT', 'GENDARMERIE', 'AVENUE', 'INFANTERIE', 'COLISSIMO', 'CHRONOPOST', 'AMAZON'].includes(m));
-}
-function cleColissimoOk(k) { // clé de contrôle des numéros Colissimo (pondération 3/1 sur les 10 premiers chiffres)
-  const d = k.slice(2, 12).split('').map(Number); let s = 0; d.forEach((x, i) => s += i % 2 ? x : 3 * x); return (10 - s % 10) % 10 === +k[12];
-}
-function numeroValide(n, tr) {
-  const k = String(n || '').toUpperCase().replace(/[^A-Z0-9]/g, ''); if (!k) return false;
-  const t = String(tr || '').toLowerCase();
-  if (/^\d[A-Z]\d{11}$/.test(k)) return cleColissimoOk(k);
-  if (t.includes('colissimo') || t.includes('poste')) return /^[A-Z]{2}\d{9}FR$/.test(k);
-  if (t.includes('amazon')) return /^FR\d{10}$/.test(k);
-  if (t.includes('chrono')) return /^[A-Z]{2}\d{9}[A-Z]{2}$/.test(k);
-  if (t.includes('dpd')) return /^\d{14}$/.test(k);
-  return !!trackKey(k);
-}
 function noter(o) { o.verifier = []; if (!numeroValide(o.numero, o.transporteur)) o.verifier.push('numero'); if (o.nom && !nomValide(o.nom)) { o.verifier.push('nom'); o.nom = ''; o.prenom = ''; }
   return (o.numero ? 2 : 0) + (o.verifier.includes('numero') ? -1 : 1) + (o.nom ? 2 : 0) + (o.cie ? 1 : 0) - (o.illisible ? 2 : 0); }
 
