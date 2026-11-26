@@ -113,6 +113,7 @@ select{font:16px Inter,sans-serif;padding:11px 12px;border:1.5px solid var(--lin
 
     <form id="f" autocomplete="off">
       <div class="seg" role="group" aria-label="Type"><button type="button" data-t="C" aria-pressed="true">C · Colis</button><button type="button" data-t="R" aria-pressed="false">R · Recommandé</button></div>
+      <label>Emballage<select id="emb"><option value="">—</option><option value="carton">📦 Carton</option><option value="souple">🛍️ Souple (sachet)</option><option value="enveloppe">✉️ Enveloppe</option></select></label>
       <label>Numéro du colis / recommandé<input id="num" class="num" required placeholder="Rempli au scan"></label>
       <label>Produit<input id="prod" placeholder="Ex. colis Amazon, Vinted…"></label>
       <div class="row2">
@@ -210,7 +211,7 @@ function trackKey(c){const k=norm(c);let m;
 function keysFor(numero,codes){const s=new Set(),m=norm(numero);if(m){let t=trackKey(m);if(!t&&/^\d{10}$/.test(m))t='FR'+m;s.add(t||m)}for(const c of codes||[]){const t=trackKey(c);if(t)s.add(t)}return s}
 const memeColis=(a,b)=>{const A=keysFor(a,[]);for(const k of keysFor(b,[]))if(A.has(k))return true;return false};
 const codesOf=i=>[i.numero,...(i.codes||[])].filter(Boolean);
-let curCodes=[],dupCtx=null,lastLu=null;
+let curCodes=[],dupCtx=null,lastLu=null,curTr='';
 function findDupKeys(numero,codes){const mine=keysFor(numero,codes);if(!mine.size)return null;for(const it of items)for(const k of keysFor(it.numero,it.codes))if(mine.has(k))return {it,code:k};return null}
 const findDup=n=>{const d=findDupKeys(n,[]);return d?d.it:null};
 
@@ -232,7 +233,7 @@ function render(){
   $('list').innerHTML=list.length?list.map(i=>`<li class="item">
     <div class="nm"><span class="bdg ${i.type==='R'?'r':''}">${i.type==='R'?'R':'C'}</span>${esc((i.nom||'').toUpperCase())} ${esc(i.prenom)}${!i.nom&&!i.prenom?'<span style="color:var(--mute)">Sans nom</span>':''}${i.cie?` <span class="pr">· ${esc(cieTxt(i.cie))}</span>`:''}</div>
     ${act?`<button class="val" data-id="${esc(i.id)}" data-to="${act[1]}" type="button">${act[0]}</button>`:''}
-    <div class="pr">${esc(i.produit||'—')}</div>
+    <div class="pr">${esc([i.produit,i.transporteur&&i.transporteur!==i.produit?i.transporteur:'',{carton:'📦 carton',souple:'🛍️ souple',enveloppe:'✉️ enveloppe'}[i.emballage]||''].filter(Boolean).join(' · ')||'—')}</div>
     ${i.infos?`<div class="pr">${esc(i.infos)}</div>`:''}
     ${i.obs?`<div class="ob">${esc(i.obs)}</div>`:''}
     <div class="no">${esc(i.numero)}</div>
@@ -337,19 +338,21 @@ async function applyLab(lab){
   const codes=lab.codes||[num].filter(Boolean);
   if(num&&$('num').value.trim()&&!memeColis($('num').value,num)){$('f').reset();setType('C');curCodes=[]} // autre colis
   await refresh();
-  const d=findDupKeys(num,codes);if(d){alarm(d.it,false,d.code,{lu:{numero:num,nom:lab.nom||'',prenom:lab.prenom||'',cie:(String(lab.cie||'').match(/[1-7]/)||[''])[0]},numero:num,codes,type:lab.type,cie:(String(lab.cie||'').match(/[1-7]/)||[''])[0],nom:lab.nom,prenom:lab.prenom,produit:lab.produit,tel:lab.tel,infos:lab.infos,obs:''});curCodes=[];return 'dup'}
-  curCodes=[...new Set([...curCodes,...codes])];
-  lastLu={numero:num,nom:lab.nom||'',prenom:lab.prenom||'',cie:(String(lab.cie||'').match(/[1-7]/)||[''])[0]};
+  const d=findDupKeys(num,codes);if(d){alarm(d.it,false,d.code,{lu:{numero:num,nom:lab.nom||'',prenom:lab.prenom||'',cie:(String(lab.cie||'').match(/[1-7]/)||[''])[0]},transporteur:lab.transporteur||'',emballage:lab.emballage||'',numero:num,codes,type:lab.type,cie:(String(lab.cie||'').match(/[1-7]/)||[''])[0],nom:lab.nom,prenom:lab.prenom,produit:lab.produit,tel:lab.tel,infos:lab.infos,obs:''});curCodes=[];return 'dup'}
+  curCodes=[...new Set([...curCodes,...codes])];curTr=lab.transporteur||curTr;
+  if(lab.emballage&&!$('emb').value)$('emb').value=lab.emballage;
+  lastLu={numero:num,nom:lab.nom||'',prenom:lab.prenom||'',cie:(String(lab.cie||'').match(/[1-7]/)||[''])[0],emballage:lab.emballage||''};
   const set=(id,v)=>{v=String(v||'').trim();if(v&&!$(id).value.trim())$(id).value=v};
   set('num',num);set('prod',lab.produit);set('nom',lab.nom);set('prenom',lab.prenom);set('tel',lab.tel);set('infos',lab.infos);
   if(lab.type==='R')setType('R');{const c=String(lab.cie||'').match(/\d+/);if(c&&+c[0]>=1&&+c[0]<=7&&!$('cie').value)$('cie').value=c[0]}
+  if((lab.verifier||[]).includes('numero'))return 'verifier';
   return $('num').value.trim()&&$('nom').value.trim()?'complet':'incomplet';
 }
 
 /* --- photo (secours) --- */
 $('cam').onchange=async e=>{
   const file=e.target.files[0];e.target.value='';if(!file)return;
-  $('f').reset();setType('C');curCodes=[];lastLu=null;   // chaque photo = un nouveau colis
+  $('f').reset();setType('C');curCodes=[];lastLu=null;curTr='';   // chaque photo = un nouveau colis
   status(lecture==='claude'?'Analyse de l\'étiquette… (quelques secondes)':'Analyse de l\'étiquette (10 à 20 s)…','',true);
   let im,u;try{({im,u}=await loadImg(file))}catch(err){status('Photo illisible, réessaie.','err');return}
   $('prev').src=u;$('prev').style.display='block';
@@ -357,6 +360,7 @@ $('cam').onchange=async e=>{
   if(lab.illisible&&!lab.numero){status('Photo trop floue ou étiquette coupée : reprends-la plus près, bien à plat.','err');return}
   const r=await applyLab(lab);if(r==='dup')return;
   if(r==='complet'){const lu=lastLu,codes=curCodes.slice();const it=await saveCurrent(true);if(it){beepOk();offerUndo(it,lu,codes)}return}
+  if(r==='verifier'){status('⚠️ Numéro à vérifier : il ne correspond pas au format '+(lab.transporteur||'attendu')+'. Compare avec l\'étiquette puis Enregistrer.','err');$('num').focus();$('num').select();return}
   const miss=missing();if(lab.connu&&!miss.length)return;
   status((lab.connu?'Personne reconnue. ':'')+'Lu, sauf : '+miss.map(x=>x[1]).join(', ')+'. Complète puis Enregistrer.','err');
   (miss.length?$(miss[0][0]):$('num')).focus();
@@ -371,11 +375,11 @@ $('scanBtn').onclick=()=>{unlockAudio();$('cam').click()};
 $('num').addEventListener('change',()=>{const d=findDup($('num').value);if(d){unlockAudio();alarm(d)}});
 
 function formPayload(){const numero=$('num').value.trim().replace(/\s+/g,'');
-  return {lu:lastLu,numero,codes:[...new Set([numero,...curCodes])],produit:$('prod').value,nom:$('nom').value,prenom:$('prenom').value,tel:$('tel').value,infos:$('infos').value,obs:$('obs').value,cie:$('cie').value,type:ctype}}
+  return {lu:lastLu,transporteur:curTr,emballage:$('emb').value,numero,codes:[...new Set([numero,...curCodes])],produit:$('prod').value,nom:$('nom').value,prenom:$('prenom').value,tel:$('tel').value,infos:$('infos').value,obs:$('obs').value,cie:$('cie').value,type:ctype}}
 async function postColis(pl,force,auto){
   try{
     const j=await api('/api/colis',{method:'POST',body:{...pl,vaguemestre:SIGN,force:!!force}});
-    items.push(j.item);ver=j.version;render();curCodes=[];lastLu=null;
+    items.push(j.item);ver=j.version;render();curCodes=[];lastLu=null;curTr='';
     $('f').reset();setType('C');$('prev').style.display='none';$('rawBox').style.display='none';
     status((auto?'Enregistré automatiquement : ':'Enregistré : ')+([(j.item.nom||'').toUpperCase(),j.item.prenom].filter(Boolean).join(' ')||j.item.numero)+' · '+fmt(j.item.ts)+'.','ok');
     return j.item;
@@ -414,7 +418,7 @@ $('list').onclick=async e=>{
 $('undo').onclick=async()=>{if(!lastDel)return;const u=lastDel;lastDel=null;$('toast').style.display='none';
   $('undo').textContent='Annuler';
   if(u.del){try{await api('/api/colis/'+encodeURIComponent(u.id),{method:'DELETE'});items=items.filter(i=>i.id!==u.id);render();
-    const it=u.item;$('num').value=it.numero||'';$('prod').value=it.produit||'';$('nom').value=it.nom||'';$('prenom').value=it.prenom||'';$('tel').value=it.tel||'';$('infos').value=it.infos||'';$('obs').value=it.obs||'';$('cie').value=it.cie||'';setType(it.type||'C');
+    const it=u.item;$('num').value=it.numero||'';$('prod').value=it.produit||'';$('nom').value=it.nom||'';$('prenom').value=it.prenom||'';$('tel').value=it.tel||'';$('infos').value=it.infos||'';$('obs').value=it.obs||'';$('cie').value=it.cie||'';$('emb').value=it.emballage||'';curTr=it.transporteur||'';setType(it.type||'C');
     curCodes=u.codes||[];lastLu=u.lu||null;status('Corrige ce qui est faux puis Enregistrer : l\'app retiendra la correction.','');$('nom').focus();$('f').scrollIntoView({behavior:'smooth',block:'center'})}catch(e){}return}
   try{const j=await api(`/api/colis/${encodeURIComponent(u.id)}/etat`,{method:'POST',body:{etat:u.etat}});const k=items.findIndex(i=>i.id===j.item.id);if(k>=0)items[k]=j.item;ver=j.version;render()}catch(e){}};
 

@@ -62,9 +62,9 @@ function apprendre(final, lu) {
   const k = plain(final.nom);
   if (k.length >= 2) { const p = learn.personnes[k] || { n: 0 }; learn.personnes[k] = { nom: final.nom, prenom: final.prenom || p.prenom || '', cie: final.cie || p.cie || '', n: p.n + 1, last: Date.now() }; }
   // 2) corrections : ce que l'IA avait lu ≠ ce que tu as validé
-  if (lu && typeof lu === 'object') for (const champ of ['numero', 'nom', 'prenom', 'cie']) {
+  if (lu && typeof lu === 'object') for (const champ of ['numero', 'nom', 'prenom', 'cie', 'emballage']) {
     const a = String(lu[champ] || '').trim(), b = String(final[champ] || '').trim();
-    if (b && a.toUpperCase() !== b.toUpperCase()) learn.corrections.push({ champ, lu: a.slice(0, 40), correct: b.slice(0, 40), ts: Date.now() });
+    if (b && a.toUpperCase() !== b.toUpperCase()) learn.corrections.push({ champ, lu: a.slice(0, 40), correct: b.slice(0, 40), tr: final.transporteur || '', ts: Date.now() });
   }
   learn.corrections = learn.corrections.slice(-40);
   saveLearn();
@@ -86,7 +86,7 @@ function completerAvecAnnuaire(out) {
 function leconsPourPrompt() {
   const c = learn.corrections.filter(x => x.lu).slice(-12);
   if (!c.length) return '';
-  return '\n\nErreurs déjà faites sur ces étiquettes (à ne pas refaire) :\n' + c.map(x => `- ${x.champ} lu « ${x.lu} » alors que c'était « ${x.correct} »`).join('\n');
+  return '\n\nErreurs déjà faites sur ces étiquettes (à ne pas refaire) :\n' + c.map(x => `- ${x.tr ? '[' + x.tr + '] ' : ''}${x.champ} lu « ${x.lu} » alors que c'était « ${x.correct} »`).join('\n');
 }
 
 // au premier démarrage, l'annuaire apprend des colis déjà enregistrés
@@ -154,7 +154,18 @@ const isHttps = req => req.headers['x-forwarded-proto'] === 'https';
 // ---------- lecture d'étiquette par Claude (si clé API) ----------
 const PROMPT = `Tu lis la photo d'une étiquette de colis reçue à l'École de gendarmerie de Chaumont (adresse : 1 avenue du 109e RI, 52000 Chaumont).
 IMPORTANT : lis UNIQUEMENT l'étiquette principale, celle qui occupe le centre / la plus grande partie de l'image. Ignore complètement les autres colis, étiquettes, étagères ou papiers visibles autour ou en arrière-plan. Toutes les infos (numéro, nom, compagnie) doivent venir de cette même étiquette.
+Où chercher selon le modèle d'étiquette :
+• Colissimo (logo colissimo, souvent sachet plastique souple) : nom en haut à gauche du bloc destinataire ; numéro après « Num colis : » (6C… / 6A… / 8R…).
+• Amazon (ORY1, DBF1, CYCLE, souvent carton) : nom sur la 1re ligne de l'adresse ; numéro FR… au centre, près du gros carré 2D.
+• Chronopost : nom en haut du bloc « Delivery address » ou après « Ref : » ; numéro XN…JB / GL…JB sous un code-barres.
+• DPD : nom après « Contact » (ignore « M. ») ; numéro après « Track ».
+• DHL / Deutsche Post : nom après « An/To » ; numéro « Shipment No. ».
+Le nom du DESTINATAIRE n'est jamais : l'expéditeur, une ville, une rue, « École de gendarmerie », un service ou un code de tri.
+
 Extrais :
+
+- transporteur : Colissimo, La Poste, Amazon, Chronopost, DPD, DHL, UPS, GLS, Mondial Relay ou Autre.
+- emballage : « carton » (boîte rigide), « souple » (sachet/pochette plastique ou papier kraft souple) ou « enveloppe ».
 
 - numero : LE numéro de suivi principal, recopié exactement sans espaces ni tirets. Formats selon le transporteur :
   • Colissimo / La Poste : 2 caractères + 11 chiffres, ex. 6C21339014797, 6A12345678901, 8R…, 6C62089323500 (souvent après « Num colis : », parfois écrit « 6C 21339014797 »). C'est le cas le plus fréquent.
@@ -174,7 +185,7 @@ Extrais :
 Ne confonds pas avec : codes postaux, dates, poids, codes de tri (DBF1, ORY1, LYS8, 52U60, FR-COL-1176-52CHA, 802-FR-52000), numéros de compte ou de client de l'expéditeur, adresse.
 N'invente rien et ne devine pas : un champ dont tu n'es pas sûr reste vide (mieux vaut vide que faux). Chaque caractère du numéro doit être clairement lisible, sinon numero vide.
 Si l'image est floue ou l'étiquette coupée, mets "illisible": true. Réponds TOUJOURS et UNIQUEMENT avec ce JSON, sans texte autour :
-{"numero":"","codes":[],"type":"C","nom":"","prenom":"","cie":"","produit":"","tel":"","infos":"","illisible":false}`;
+{"transporteur":"","emballage":"","numero":"","codes":[],"type":"C","nom":"","prenom":"","cie":"","produit":"","tel":"","infos":"","illisible":false}`;
 
 async function appelClaude(b64, model) {
   const ctl = new AbortController();
@@ -210,13 +221,40 @@ async function lireAvec(b64, model) {
   if (txt === undefined) throw last;
   return analyser(txt);
 }
+// ---------- contrôle de cohérence : pas de mots au hasard ----------
+const MOTS_INTERDITS = new Set(('CHAUMONT FRANCE ECOLE GENDARMERIE AVENUE AV RUE REGIMENT RGT INFANTERIE RI CIE COMPAGNIE CYCLE DBF ORY LYS COLISSIMO CHRONOPOST AMAZON DPD DHL UPS GLS ' +
+  'LA POSTE PREDICT SIGN DOM CONTACT REF TRACK SERVICE SHIPMENT DELIVERY ADDRESS DESTINATAIRE EXPEDITEUR SENDER COLIS POIDS KG PREMIUM PAKET INTERNATIONAL FR CEDEX BP SECTION BATIMENT').split(' '));
+const plainUp = s => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toUpperCase();
+function nomValide(n) {
+  const t = plainUp(n).trim(); if (!t || /\d/.test(t) || t.length < 2 || t.length > 40) return false;
+  const mots = t.split(/[\s'-]+/).filter(Boolean); if (!mots.length || mots.length > 4) return false;
+  return !mots.every(m => MOTS_INTERDITS.has(m)) && !mots.some(m => ['CHAUMONT', 'GENDARMERIE', 'AVENUE', 'INFANTERIE', 'COLISSIMO', 'CHRONOPOST', 'AMAZON'].includes(m));
+}
+function cleColissimoOk(k) { // clé de contrôle des numéros Colissimo (pondération 3/1 sur les 10 premiers chiffres)
+  const d = k.slice(2, 12).split('').map(Number); let s = 0; d.forEach((x, i) => s += i % 2 ? x : 3 * x); return (10 - s % 10) % 10 === +k[12];
+}
+function numeroValide(n, tr) {
+  const k = String(n || '').toUpperCase().replace(/[^A-Z0-9]/g, ''); if (!k) return false;
+  const t = String(tr || '').toLowerCase();
+  if (/^\d[A-Z]\d{11}$/.test(k)) return cleColissimoOk(k);
+  if (t.includes('colissimo') || t.includes('poste')) return /^[A-Z]{2}\d{9}FR$/.test(k);
+  if (t.includes('amazon')) return /^FR\d{10}$/.test(k);
+  if (t.includes('chrono')) return /^[A-Z]{2}\d{9}[A-Z]{2}$/.test(k);
+  if (t.includes('dpd')) return /^\d{14}$/.test(k);
+  return !!trackKey(k);
+}
+function noter(o) { o.verifier = []; if (!numeroValide(o.numero, o.transporteur)) o.verifier.push('numero'); if (o.nom && !nomValide(o.nom)) { o.verifier.push('nom'); o.nom = ''; o.prenom = ''; }
+  return (o.numero ? 2 : 0) + (o.verifier.includes('numero') ? -1 : 1) + (o.nom ? 2 : 0) + (o.cie ? 1 : 0) - (o.illisible ? 2 : 0); }
+
 async function lireEtiquette(b64) {
   learn.stats.lectures++;
-  let out = await lireAvec(b64, MODEL);
-  if ((!out.numero || !out.nom || out.illisible) && MODEL_FIABLE && MODEL_FIABLE !== MODEL) {
+  let out = await lireAvec(b64, MODEL), score = noter(out);
+  const douteux = !out.numero || !out.nom || out.illisible || out.verifier.length;
+  if (douteux && MODEL_FIABLE && MODEL_FIABLE !== MODEL) {
     learn.stats.sonnet++;
-    try { const o2 = await lireAvec(b64, MODEL_FIABLE); if (o2.numero || o2.nom) out = o2; } catch (e) { console.error('fiable:', e.message); }
+    try { const o2 = await lireAvec(b64, MODEL_FIABLE); const s2 = noter(o2); if (s2 >= score) { out = o2; score = s2; } } catch (e) { console.error('fiable:', e.message); }
   }
+  if (out.transporteur) { learn.transporteurs = learn.transporteurs || {}; learn.transporteurs[out.transporteur] = (learn.transporteurs[out.transporteur] || 0) + 1; }
   saveLearn();
   return completerAvecAnnuaire(out);
 }
@@ -226,7 +264,8 @@ function analyser(txt) {
   try { o = m ? JSON.parse(m[0]) : { illisible: true }; } catch (e) { o = { illisible: true }; }
   const norm = c => String(c || '').replace(/[\s-]+/g, '').toUpperCase();
   const out = {};
-  for (const k of ['type', 'cie', 'nom', 'prenom', 'produit', 'tel', 'infos']) out[k] = String(o[k] ?? '').trim();
+  for (const k of ['type', 'cie', 'nom', 'prenom', 'produit', 'tel', 'infos', 'transporteur', 'emballage']) out[k] = String(o[k] ?? '').trim();
+  out.emballage = /souple|sachet|pochette|plast/i.test(out.emballage) ? 'souple' : /envel/i.test(out.emballage) ? 'enveloppe' : /carton|boite|boîte/i.test(out.emballage) ? 'carton' : '';
   out.numero = norm(o.numero);
   out.codes = [...new Set([out.numero, ...(Array.isArray(o.codes) ? o.codes : []).map(norm)].filter(c => c.length >= 6 && c.length <= 40))];
   out.type = out.type.toUpperCase() === 'R' ? 'R' : 'C';
@@ -282,6 +321,7 @@ const server = http.createServer(async (req, res) => {
           id: crypto.randomBytes(8).toString('hex'), numero: numero || codes[0], codes, numKey: numKey(numero || codes[0]),
           produit: clean(b.produit), nom: clean(b.nom, 100).toUpperCase(), prenom: clean(b.prenom, 100),
           tel: clean(b.tel, 30), infos: clean(b.infos, 500), obs: clean(b.obs, 500),
+          transporteur: clean(b.transporteur, 30), emballage: ['carton', 'souple', 'enveloppe'].includes(b.emballage) ? b.emballage : '',
           type: b.type === 'R' ? 'R' : 'C', cie: clean(b.cie, 30), vaguemestre: clean(b.vaguemestre, 60) || SIGNATURE,
           ts: Date.now(), etat: 'recu', reporteAt: null, remisAt: null
         };
