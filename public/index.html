@@ -142,6 +142,7 @@ select{font:16px Inter,sans-serif;padding:11px 12px;border:1.5px solid var(--lin
   <section id="adminBox" hidden style="margin-top:22px"><h2 style="margin:0 0 8px">Codes d'accès (admin)</h2>
     <p class="note" id="compteCagnotte" style="text-align:left"></p>
     <button class="btn" id="newCode" type="button" style="width:100%">+ Créer un code d'accès</button>
+    <button class="btn" id="priveBtn" type="button" style="width:100%;margin-top:8px">Mode privé (seul mon iPhone) : …</button>
     <button class="btn" id="logoutAll" type="button" style="width:100%;margin-top:8px">Déconnecter tous les téléphones (sauf le mien)</button>
     <form id="effForm" style="display:flex;gap:8px;margin-top:8px"><input id="effNom" placeholder="NOM à effacer (droit à l'effacement)"><button class="btn" type="submit">Effacer</button></form>
     <ul id="codesList" style="margin-top:10px"></ul></section>
@@ -179,6 +180,7 @@ async function api(path,opt={}){
   const r=await fetch(path,{credentials:'same-origin',headers:{'Content-Type':'application/json'},...opt,body:opt.body?JSON.stringify(opt.body):undefined});
   if(r.status===401&&path!=='/api/login'){if(estConnecte){estConnecte=false;items=[];ver=0;render();$('lerr').textContent='Accès terminé (24 h écoulées ou code retiré) : retape ton code.'}showLogin();throw {status:401}}
   const j=await r.json().catch(()=>({}));
+  if(r.status===403&&j.prive&&path!=='/api/login'){location.reload();throw {status:403,...j}}
   if(!r.ok)throw {status:r.status,...j};
   return j;
 }
@@ -477,9 +479,11 @@ $('logout').onclick=async()=>{try{await api('/api/logout',{method:'POST'})}catch
     $('codeVal').textContent=j.code;$('codeBox').style.display='block';$('pw').value=j.code;showLogin()}
   catch(err){showLogin();$('lerr').textContent=err.error||'Paiement non retrouvé'}})();
 // admin : gestion des codes
-async function loadCodes(){try{const j=await api('/api/admin/codes');const k=j.cagnotte;$('compteCagnotte').textContent=`Comptes de la cagnotte : versé ${euros(k.verse)} · frais Stripe ≈ ${euros(k.frais)} · dépensé en IA ${euros(k.depense)} (${k.lectures} lectures, ${(k.coutMoyen).toFixed(2).replace('.',',')} centime en moyenne) · reste ${euros(k.solde)}`;const L=Object.entries(j.codes).filter(([c,v])=>!v.enAttente).sort((a,b)=>b[1].cree-a[1].cree);
+async function loadCodes(){majPrive();try{const j=await api('/api/admin/codes');const k=j.cagnotte;$('compteCagnotte').textContent=`Comptes de la cagnotte : versé ${euros(k.verse)} · frais Stripe ≈ ${euros(k.frais)} · dépensé en IA ${euros(k.depense)} (${k.lectures} lectures, ${(k.coutMoyen).toFixed(2).replace('.',',')} centime en moyenne) · reste ${euros(k.solde)}`;const L=Object.entries(j.codes).filter(([c,v])=>!v.enAttente).sort((a,b)=>b[1].cree-a[1].cree);
   $('codesList').innerHTML=L.length?L.map(([c,v])=>`<li class="item" style="grid-template-columns:minmax(0,1fr) auto"><div><b style="font:800 17px Archivo">${esc(c)}</b> <span class="pr">${v.verse?'a versé '+euros(v.verse):'n\'a rien versé'} · ${v.scans||0} scans${v.email?' · '+esc(v.email):''}</span><div class="dt">${v.actif?(v.device?'utilisé sur un téléphone':'pas encore utilisé'):'désactivé'} · ${esc(fmt(v.cree))}</div></div>
     <div style="display:grid;gap:6px">${v.device?`<button class="cp" data-c="${esc(c)}" data-a="liberer" type="button">Changer de tél.</button>`:''}<button class="cp" data-c="${esc(c)}" data-a="crediter" type="button">+ Participation</button><button class="cp" data-c="${esc(c)}" data-a="supprimer" type="button">Supprimer</button><button class="cp" data-c="${esc(c)}" data-a="${v.actif?'desactiver':'activer'}" type="button">${v.actif?'Désactiver':'Réactiver'}</button></div></li>`).join(''):'<li class="empty">Aucun code pour l\'instant.</li>'}catch(e){}}
+async function majPrive(v){if(v===undefined){try{v=(await api('/api/admin/prive')).prive}catch(e){return}}$('priveBtn').dataset.on=v?'1':'';$('priveBtn').textContent='Mode privé (seul mon iPhone) : '+(v?'ACTIVÉ':'désactivé');$('priveBtn').style.background=v?'#b91c1c':'';$('priveBtn').style.color=v?'#fff':''}
+$('priveBtn').onclick=async()=>{const on=!$('priveBtn').dataset.on;if(on&&!confirm('Activer le mode privé ? Tous les autres téléphones sont bloqués tout de suite et voient « Voir avec le propriétaire du site ».'))return;try{const j=await api('/api/admin/prive',{method:'POST',body:{actif:on}});majPrive(j.prive);status(j.prive?'Mode privé activé : seul ton iPhone a accès.':'Mode privé désactivé.','ok')}catch(e){status(e.error||'Erreur','err')}};
 $('logoutAll').onclick=async()=>{if(!confirm('Déconnecter tous les autres téléphones ?'))return;try{await api('/api/admin/deconnecter-tous',{method:'POST'});status('Tous les autres téléphones sont déconnectés.','ok')}catch(e){}};
 $('effForm').onsubmit=async e=>{e.preventDefault();const n=$('effNom').value.trim();if(!n||!confirm('Effacer toutes les données de '+n+' (colis + annuaire) ?'))return;
   try{const j=await api('/api/admin/effacer-personne',{method:'POST',body:{nom:n}});$('effNom').value='';status(`Données de ${n} effacées (${j.colisSupprimes} colis).`,'ok');refresh()}catch(err){status(err.error||'Erreur','err')}};

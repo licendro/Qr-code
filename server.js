@@ -355,6 +355,19 @@ function analyser(txt) {
   return out;
 }
 
+// ---------- mode privé : seul l'iPhone du propriétaire passe ----------
+const estPrive = () => acces.prive ?? (process.env.MODE_PRIVE === '1');
+const estProprio = req => { const s = sessionDe(req); return !!s && s.role === 'admin' && (!acces.adminDevice || s.device === acces.adminDevice); };
+const MSG_PRIVE = 'Accès réservé : voir avec le propriétaire du site.';
+const PAGE_PRIVE = `<!doctype html><html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex"><title>Accès réservé</title>
+<style>body{margin:0;min-height:100vh;display:grid;place-items:center;background:#0f172a;color:#e2e8f0;font:16px system-ui,sans-serif;text-align:center;padding:24px;box-sizing:border-box}h1{font-size:26px;margin:12px 0}p{color:#94a3b8;margin:0 0 6px}#k{margin-top:40px;font-size:12px;color:#475569;background:none;border:0}#f{display:none;margin-top:14px;gap:8px}#f input,#f button{font:inherit;padding:10px;border-radius:8px;border:1px solid #334155;background:#1e293b;color:#e2e8f0}#e{color:#f87171;font-size:14px;min-height:20px;margin-top:8px}</style></head>
+<body><main><div style="font-size:46px">🔒</div><h1>Accès réservé</h1><p>Ce site est privé.</p><p>Voir avec le propriétaire du site.</p>
+<button id="k" type="button">Propriétaire</button><form id="f"><input id="pw" type="password" placeholder="Mot de passe" autocomplete="current-password"><button>Entrer</button></form><div id="e"></div></main>
+<script>document.getElementById('k').onclick=()=>{document.getElementById('f').style.display='flex';document.getElementById('pw').focus()};
+document.getElementById('f').onsubmit=async ev=>{ev.preventDefault();let d='';try{d=localStorage.getItem('device')||''}catch(x){}
+const r=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({password:document.getElementById('pw').value,device:d})});
+if(r.ok)location.href='/';else{const j=await r.json().catch(()=>({}));document.getElementById('e').textContent=j.error||'Refusé'}}</script></body></html>`;
+
 // ---------- routes ----------
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.png': 'image/png', '.svg': 'image/svg+xml', '.webmanifest': 'application/manifest+json' };
 
@@ -366,6 +379,10 @@ const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://x');
   const p = url.pathname;
   try {
+    if (estPrive() && !estProprio(req) && !(p === '/api/login' && req.method === 'POST') && p !== '/api/stripe-webhook' && p !== '/confidentialite.html') {
+      if (p.startsWith('/api/')) return send(res, 403, { error: MSG_PRIVE, prive: true });
+      res.writeHead(403, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' }); return res.end(PAGE_PRIVE);
+    }
     if (p === '/api/login' && req.method === 'POST') {
       const ip = String(req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
       const t = (tentatives[ip] = (tentatives[ip] || []).filter(x => Date.now() - x < 15 * 60e3));
@@ -381,6 +398,7 @@ const server = http.createServer(async (req, res) => {
         delete tentatives[ip]; const sid = crypto.randomBytes(32).toString('hex'); sessions[sid] = { role: 'admin', device }; saveSessions();
         return send(res, 200, { ok: true, role: 'admin' }, { 'Set-Cookie': cookieSid(req, sid) });
       }
+      if (estPrive()) { await new Promise(r => setTimeout(r, 1200)); return send(res, 403, { error: MSG_PRIVE, prive: true }); }
       const code = saisie.toUpperCase().replace(/[^A-Z0-9]/g, '').replace(/^(.{4})(.{4})$/, '$1-$2');
       const c = acces.codes[code];
       if (!c || !c.actif) { await new Promise(r => setTimeout(r, 1200)); return send(res, 401, { error: 'Code incorrect' }); }
@@ -444,6 +462,8 @@ const server = http.createServer(async (req, res) => {
         if (sessionDe(req).role !== 'admin') return send(res, 403, { error: 'réservé à l\'admin' });
         if (p === '/api/admin/codes' && req.method === 'GET') return send(res, 200, { codes: acces.codes, stripe: !!STRIPE_KEY, cagnotte: etatCagnotte(null) });
         if (p === '/api/admin/codes' && req.method === 'POST') { const code = nouveauCode(); acces.codes[code] = { actif: true, cree: Date.now(), source: 'offert' }; saveAcces(); return send(res, 200, { code }); }
+        if (p === '/api/admin/prive' && req.method === 'GET') return send(res, 200, { prive: estPrive() });
+        if (p === '/api/admin/prive' && req.method === 'POST') { const b = await readBody(req, 1000); acces.prive = !!b.actif; if (acces.prive) { for (const [sid, ss] of Object.entries(sessions)) if (!(ss.role === 'admin' && (!acces.adminDevice || ss.device === acces.adminDevice))) delete sessions[sid]; saveSessions(); } saveAcces(); return send(res, 200, { prive: acces.prive }); }
         if (p === '/api/admin/deconnecter-tous' && req.method === 'POST') { for (const [sid, ss] of Object.entries(sessions)) if (ss.role !== 'admin') delete sessions[sid]; saveSessions(); return send(res, 200, { ok: true }); }
         if (p === '/api/admin/effacer-personne' && req.method === 'POST') {   // droit à l'effacement (RGPD)
           const bb = await readBody(req, 2000); const k = plain(bb.nom); if (k.length < 2) return send(res, 400, { error: 'nom manquant' });
