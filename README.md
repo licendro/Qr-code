@@ -64,14 +64,13 @@ cd ~/qr-code && git pull && pm2 restart qr-code
 
 Le dossier `data/` n'est pas suivi par git, donc une mise à jour ne l'efface jamais.
 
-## Crédit prépayé (pas de bénéfice : ça paie seulement l'API)
+## Cagnotte commune (sans bénéfice)
 
-- Participation aux frais : par carte via Stripe (si activé, 2 € minimum) ou en direct à l'admin qui ajoute le crédit (« + Crédit ») → reçoit un **code** (affiché + écrit sur le reçu Stripe). Un code = un téléphone.
-- Chaque lecture d'étiquette par l'IA retire **3 centimes** du crédit du code ; les doublons repérés par code-barres et la saisie à la main sont gratuits. Bouton « Recharger ».
-- `APP_PASSWORD` = **admin illimité et gratuit**, verrouillé sur le premier téléphone qui s'en sert. Panneau « Codes d'accès » : code offert (2 € de crédit), +2 €, changer de téléphone, désactiver.
-- Le crédit est versé par le **webhook** `checkout.session.completed` / `async_payment_succeeded` (signature vérifiée) et, en secours, par la page de retour (jamais crédité deux fois).
-- Webhook Stripe : `https://colis.jdev-hub.fr/api/stripe-webhook`.
-- Changer le téléphone admin : `cd ~/qr-code && node -e "const f='data/acces.json',a=require('./'+f);a.adminDevice=null;require('fs').writeFileSync(f,JSON.stringify(a,null,1))" && pm2 restart qr-code`
+- Une seule **cagnotte** pour tout le monde : chacun participe par carte (Stripe) de **2 € à 10 € maximum par personne** (cumulé) et reçoit un code d'accès.
+- Chaque lecture d'étiquette retire son **coût réel** (tokens × tarif Anthropic, ≈ 0,6 centime) ; **cagnotte vide → plus de lecture IA** pour les utilisateurs (saisie à la main toujours possible). L'admin n'est jamais bloqué.
+- **Pas de bénéfice** : dès que la cagnotte atteint 20 € (`PLAFOND_CAGNOTTE_CENTIMES`), les paiements sont refusés jusqu'à ce qu'elle redescende.
+- Participations en direct (espèces, virement) : bouton « + Participation » dans le panneau admin. Comptes visibles par l'admin : versé, frais Stripe, dépensé en IA, reste.
+- Webhook Stripe : `https://colis.jdev-hub.fr/api/stripe-webhook` (`checkout.session.completed`, `checkout.session.async_payment_succeeded`, `checkout.session.async_payment_failed`).
 
 ## Données personnelles et sécurité (RGPD)
 

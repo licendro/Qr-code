@@ -68,10 +68,26 @@ const saveSessions = () => writeJson(SESS_FILE, sessions);
 const ACCES_FILE = path.join(DATA, 'acces.json');
 let acces = readJson(ACCES_FILE, { codes: {}, adminDevice: null, sessionsStripe: {} });
 const saveAcces = () => writeJson(ACCES_FILE, acces);
-const PRIX_SCAN = Number(process.env.PRIX_SCAN_CENTIMES) || 3;        // 3 centimes par lecture IA
-const MIN_RECHARGE = Number(process.env.MIN_RECHARGE_CENTIMES) || 200;  // 2 € minimum, montant libre au-dessus
-const MAX_RECHARGE = 10000;
-const CREDIT_OFFERT = Number(process.env.CREDIT_OFFERT_CENTIMES) || 200; // crédit d'un code offert par l'admin
+// ---------- cagnotte commune (sans bénéfice) ----------
+// Chaque lecture IA retire son COÛT RÉEL (tokens × tarif Anthropic) ; les paiements s'arrêtent quand la cagnotte est assez remplie.
+const MIN_RECHARGE = Number(process.env.MIN_RECHARGE_CENTIMES) || 200;          // 2 € minimum par participation
+const PLAFOND_PERSONNE = Number(process.env.PLAFOND_PERSONNE_CENTIMES) || 1000; // 10 € maximum par personne (cumulé)
+const PLAFOND_CAGNOTTE = Number(process.env.PLAFOND_CAGNOTTE_CENTIMES) || 2000; // au-delà, on bloque les paiements (pas de bénéfice)
+const FRAIS_FIXE = 25, FRAIS_PCT = 1.5;                                          // frais Stripe estimés (carte européenne)
+const TAUX_USD_EUR = Number(process.env.TAUX_USD_EUR) || 0.92;
+const TARIFS = { // dollars par million de tokens : entrée, sortie, écriture cache 1 h (2×), lecture cache
+  'claude-sonnet-5-5': [2, 10, 4, 0.10], 'claude-haiku-5-5': [0.10, 0.50, 0.20, 0.01], 'claude-opus-5-5': [4, 20, 8, 0.20] };
+const coutCentimes = (model, u) => { const t = TARIFS[model] || TARIFS['claude-sonnet-5-5'];
+  return ((u.input_tokens || 0) * t[0] + (u.output_tokens || 0) * t[1] + (u.cache_creation_input_tokens || 0) * t[2] + (u.cache_read_input_tokens || 0) * t[3]) / 1e6 * 100 * TAUX_USD_EUR; };
+acces.cagnotte = acces.cagnotte || { solde: 0, verse: 0, frais: 0, depense: 0, lectures: 0 };
+function etatCagnotte(code) {
+  const k = acces.cagnotte, verseMoi = code && acces.codes[code] ? acces.codes[code].verse || 0 : 0;
+  const max = Math.floor(Math.min(PLAFOND_CAGNOTTE - k.solde, PLAFOND_PERSONNE - verseMoi) / 50) * 50; // par pas de 0,50 €
+  return { solde: Math.round(k.solde), verse: k.verse, frais: Math.round(k.frais), depense: Math.round(k.depense), lectures: k.lectures,
+    coutMoyen: k.lectures ? k.depense / k.lectures : 1, plafond: PLAFOND_CAGNOTTE, plafondPersonne: PLAFOND_PERSONNE, verseMoi,
+    ouvert: !!STRIPE_KEY && max >= MIN_RECHARGE, maxPaiement: Math.max(0, max), min: MIN_RECHARGE,
+    raison: !STRIPE_KEY ? 'stripe' : PLAFOND_PERSONNE - verseMoi < MIN_RECHARGE ? 'personne' : PLAFOND_CAGNOTTE - k.solde < MIN_RECHARGE ? 'pleine' : '' };
+}
 acces.credite = acces.credite || {};
 const STRIPE_KEY = process.env.STRIPE_SECRET_KEY || process.env.STRIPE_RESTRICTED_KEY || '';
 const STRIPE_WHSEC = process.env.STRIPE_WEBHOOK_SECRET || '';
@@ -84,7 +100,9 @@ function activerCodeSession(cs) {
   if (!code) return null;
   const c = acces.codes[code] || (acces.codes[code] = { cree: Date.now(), source: 'stripe' });
   c.actif = true; c.enAttente = false; c.email = cs.customer_details?.email || c.email || '';
-  if (!acces.credite[cs.id]) { acces.credite[cs.id] = true; c.solde = (c.solde || 0) + (cs.amount_total || 0); c.verse = (c.verse || 0) + (cs.amount_total || 0); c.dernierPaiement = Date.now(); }
+  if (!acces.credite[cs.id]) { acces.credite[cs.id] = true; const m = cs.amount_total || 0, frais = FRAIS_FIXE + m * FRAIS_PCT / 100;
+    c.verse = (c.verse || 0) + m; c.dernierPaiement = Date.now();
+    acces.cagnotte.verse += m; acces.cagnotte.frais += frais; acces.cagnotte.solde += m - frais; }
   acces.sessionsStripe[cs.id] = code; saveAcces();
   return code;
 }
@@ -249,7 +267,7 @@ N'invente rien et ne devine pas : un champ dont tu n'es pas sûr reste vide (mie
 Si l'image est floue ou l'étiquette coupée, mets "illisible": true. Réponds TOUJOURS et UNIQUEMENT avec ce JSON, sans texte autour :
 {"transporteur":"","emballage":"","numero":"","codes":[],"type":"C","nom":"","prenom":"","cie":"","produit":"","tel":"","infos":"","illisible":false}`;
 
-async function appelClaude(b64, model) {
+async function appelClaude(b64, model, acc) {
   const ctl = new AbortController();
   const t = setTimeout(() => ctl.abort(), 45000);
   try {
@@ -270,6 +288,7 @@ async function appelClaude(b64, model) {
     if (!r.ok) { const e = new Error(j?.error?.message || ('API ' + r.status)); e.status = r.status; throw e; }
     const u = j.usage || {}; learn.stats.cacheLu = (learn.stats.cacheLu || 0) + (u.cache_read_input_tokens || 0);
     learn.stats.cacheEcrit = (learn.stats.cacheEcrit || 0) + (u.cache_creation_input_tokens || 0); dernierAppel = Date.now();
+    if (acc) acc.cents += coutCentimes(model, u);
     return (j.content || []).map(c => c.text || '').join('');
   } finally { clearTimeout(t); }
 }
@@ -288,10 +307,10 @@ setInterval(async () => {
   } catch (e) {}
 }, 5 * 60000);
 
-async function lireAvec(b64, model) {
+async function lireAvec(b64, model, acc) {
   let txt, last;
   for (let essai = 0; essai < 3; essai++) {
-    try { txt = await appelClaude(b64, model); break; }
+    try { txt = await appelClaude(b64, model, acc); break; }
     catch (e) {
       last = e;
       if (e.status && ![429, 500, 502, 503, 529].includes(e.status)) throw e;
@@ -307,15 +326,16 @@ function noter(o) { o.verifier = []; if (!numeroValide(o.numero, o.transporteur)
 
 async function lireEtiquette(b64) {
   learn.stats.lectures++;
-  let out = await lireAvec(b64, MODEL), score = noter(out);
+  const acc = { cents: 0 };
+  let out = await lireAvec(b64, MODEL, acc), score = noter(out);
   const douteux = !out.numero || !out.nom || out.illisible || out.verifier.length;
   if (douteux && MODEL_FIABLE && MODEL_FIABLE !== MODEL) {
     learn.stats.sonnet++;
-    try { const o2 = await lireAvec(b64, MODEL_FIABLE); const s2 = noter(o2); if (s2 >= score) { out = o2; score = s2; } } catch (e) { console.error('fiable:', e.message); }
+    try { const o2 = await lireAvec(b64, MODEL_FIABLE, acc); const s2 = noter(o2); if (s2 >= score) { out = o2; score = s2; } } catch (e) { console.error('fiable:', e.message); }
   }
   if (out.transporteur) { learn.transporteurs = learn.transporteurs || {}; learn.transporteurs[out.transporteur] = (learn.transporteurs[out.transporteur] || 0) + 1; }
   saveLearn();
-  return completerAvecAnnuaire(out);
+  out = completerAvecAnnuaire(out); out._cout = acc.cents; return out;
 }
 function analyser(txt) {
   const m = txt.match(/\{[\s\S]*\}/);
@@ -370,23 +390,25 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, { ok: true, role: 'user', expire: Date.now() + DUREE_SESSION_H * 3600e3 }, { 'Set-Cookie': cookieSid(req, sid, DUREE_SESSION_H * 3600) });
     }
     // ----- paiement Stripe : 5 € → un code -----
-    if (p === '/api/config') return send(res, 200, { stripe: !!STRIPE_KEY, prixScan: PRIX_SCAN, minRecharge: MIN_RECHARGE, contact: process.env.CONTACT_CREDIT || 'Julien MERCERON' });
+    if (p === '/api/config') return send(res, 200, { stripe: !!STRIPE_KEY, cagnotte: etatCagnotte(null), contact: process.env.CONTACT_CREDIT || 'Julien MERCERON' });
     if (p === '/api/payer' && req.method === 'POST') {
       if (!STRIPE_KEY) return send(res, 501, { error: 'Paiement en ligne pas encore activé : demande un code au vaguemestre.' });
       const b = await readBody(req, 2000);
       const montant = Math.round(Number(b.montant) * 100);
-      if (!(montant >= MIN_RECHARGE && montant <= MAX_RECHARGE)) return send(res, 400, { error: `Montant entre ${MIN_RECHARGE / 100} € et ${MAX_RECHARGE / 100} €` });
       const ss = sessionDe(req);
-      let code = ss && ss.role === 'user' ? ss.code : null;                       // recharge de son propre code
-      if (!code) { code = nouveauCode(); acces.codes[code] = { actif: false, cree: Date.now(), source: 'stripe', enAttente: true, solde: 0 }; saveAcces(); }
+      let code = ss && ss.role === 'user' ? ss.code : null;                       // participation avec son propre code
+      const etat = etatCagnotte(code);
+      if (!etat.ouvert) return send(res, 409, { error: etat.raison === 'personne' ? 'Tu as déjà participé à hauteur de 10 €, merci !' : 'La cagnotte est assez remplie pour le moment : pas besoin de payer.', cagnotte: etat });
+      if (!(montant >= MIN_RECHARGE && montant <= etat.maxPaiement)) return send(res, 400, { error: `Montant entre ${MIN_RECHARGE / 100} € et ${(etat.maxPaiement / 100).toFixed(2).replace('.', ',')} €`, cagnotte: etat });
+      if (!code) { code = nouveauCode(); acces.codes[code] = { actif: false, cree: Date.now(), source: 'stripe', enAttente: true }; saveAcces(); }
       const base = BASE_URL || ((isHttps(req) ? 'https://' : 'http://') + req.headers.host);
       const cs = await stripe('POST', '/checkout/sessions', {
         'metadata[code]': code, 'payment_intent_data[metadata][code]': code,
-        'payment_intent_data[description]': `Crédit Scan colis (${Math.floor(montant / PRIX_SCAN)} scans) — ton code : ${code}`, // visible sur le reçu Stripe
+        'payment_intent_data[description]': `Participation à la cagnotte Scan colis — ton code d'accès : ${code}`, // visible sur le reçu Stripe
         mode: 'payment', 'line_items[0][quantity]': '1', 'line_items[0][price_data][currency]': 'eur',
         'line_items[0][price_data][unit_amount]': String(montant),
-        'line_items[0][price_data][product_data][name]': 'Crédit Scan colis',
-        'line_items[0][price_data][product_data][description]': `${Math.floor(montant / PRIX_SCAN)} lectures d'étiquettes à ${PRIX_SCAN} centimes — sert uniquement à payer l'IA`,
+        'line_items[0][price_data][product_data][name]': 'Participation cagnotte Scan colis',
+        'line_items[0][price_data][product_data][description]': 'Cagnotte commune sans bénéfice : sert uniquement à payer la lecture des étiquettes par l\'IA (10 € max par personne)',
         success_url: base + '/?paye={CHECKOUT_SESSION_ID}', cancel_url: base + '/'
       });
       return send(res, 200, { url: cs.url });
@@ -403,11 +425,11 @@ const server = http.createServer(async (req, res) => {
       const b = await readBody(req, 2000); const id = String(b.session || '');
       if (!STRIPE_KEY || !/^cs_[A-Za-z0-9_]+$/.test(id)) return send(res, 400, { error: 'paiement inconnu' });
       const dejaActif = acces.sessionsStripe[id] && acces.codes[acces.sessionsStripe[id]]?.actif;
-      if (dejaActif && acces.credite[id]) return send(res, 200, { code: acces.sessionsStripe[id], solde: acces.codes[acces.sessionsStripe[id]].solde || 0 });
+      if (dejaActif && acces.credite[id]) return send(res, 200, { code: acces.sessionsStripe[id], cagnotte: etatCagnotte(acces.sessionsStripe[id]) });
       const cs = await stripe('GET', '/checkout/sessions/' + encodeURIComponent(id));
       const code = activerCodeSession(cs);
       if (!code) return send(res, 402, { error: 'Paiement pas encore confirmé, réessaie dans un instant' });
-      return send(res, 200, { code, solde: acces.codes[code].solde || 0 });
+      return send(res, 200, { code, cagnotte: etatCagnotte(code) });
     }
     if (p.startsWith('/api/')) {
       if (!authed(req)) return send(res, 401, { error: 'non connecté' });
@@ -416,12 +438,12 @@ const server = http.createServer(async (req, res) => {
         delete sessions[cookies(req).sid]; saveSessions();
         return send(res, 200, { ok: true }, { 'Set-Cookie': 'sid=; Path=/; Max-Age=0', 'Clear-Site-Data': '"cache"' });
       }
-      if (p === '/api/me') { const ss = sessionDe(req), cc = ss.code ? acces.codes[ss.code] : null; return send(res, 200, { ok: true, role: ss.role, code: ss.code || null, solde: cc ? cc.solde || 0 : null, prixScan: PRIX_SCAN, minRecharge: MIN_RECHARGE, lecture: API_KEY ? 'claude' : 'locale', signature: SIGNATURE, appris: Object.keys(learn.personnes).length, corrections: learn.corrections.length, stats: learn.stats }); }
+      if (p === '/api/me') { const ss = sessionDe(req), cc = ss.code ? acces.codes[ss.code] : null; return send(res, 200, { ok: true, role: ss.role, code: ss.code || null, cagnotte: etatCagnotte(ss.code), lecture: API_KEY ? 'claude' : 'locale', signature: SIGNATURE, appris: Object.keys(learn.personnes).length, corrections: learn.corrections.length, stats: learn.stats }); }
 
       if (p.startsWith('/api/admin/')) {
         if (sessionDe(req).role !== 'admin') return send(res, 403, { error: 'réservé à l\'admin' });
-        if (p === '/api/admin/codes' && req.method === 'GET') return send(res, 200, { codes: acces.codes, stripe: !!STRIPE_KEY, prixScan: PRIX_SCAN });
-        if (p === '/api/admin/codes' && req.method === 'POST') { const code = nouveauCode(); acces.codes[code] = { actif: true, cree: Date.now(), source: 'offert', solde: CREDIT_OFFERT }; saveAcces(); return send(res, 200, { code }); }
+        if (p === '/api/admin/codes' && req.method === 'GET') return send(res, 200, { codes: acces.codes, stripe: !!STRIPE_KEY, cagnotte: etatCagnotte(null) });
+        if (p === '/api/admin/codes' && req.method === 'POST') { const code = nouveauCode(); acces.codes[code] = { actif: true, cree: Date.now(), source: 'offert' }; saveAcces(); return send(res, 200, { code }); }
         if (p === '/api/admin/deconnecter-tous' && req.method === 'POST') { for (const [sid, ss] of Object.entries(sessions)) if (ss.role !== 'admin') delete sessions[sid]; saveSessions(); return send(res, 200, { ok: true }); }
         if (p === '/api/admin/effacer-personne' && req.method === 'POST') {   // droit à l'effacement (RGPD)
           const bb = await readBody(req, 2000); const k = plain(bb.nom); if (k.length < 2) return send(res, 400, { error: 'nom manquant' });
@@ -433,7 +455,7 @@ const server = http.createServer(async (req, res) => {
         if (m3 && req.method === 'DELETE') { delete acces.codes[m3[1]]; for (const [sid, ss] of Object.entries(sessions)) if (ss.code === m3[1]) delete sessions[sid]; saveAcces(); saveSessions(); return send(res, 200, { ok: true }); }
         const m2 = p.match(/^\/api\/admin\/codes\/([A-Z0-9-]{9})\/(liberer|desactiver|activer|crediter)$/);
         if (m2 && req.method === 'POST') { const c = acces.codes[m2[1]]; if (!c) return send(res, 404, { error: 'code inconnu' });
-          if (m2[2] === 'liberer') c.device = null; else if (m2[2] === 'crediter') { const bb = await readBody(req, 500).catch(() => ({})); const cents = Math.round(Number(bb.euros || 2) * 100); if (!(cents > 0 && cents <= 100000)) return send(res, 400, { error: 'montant invalide' }); c.solde = (c.solde || 0) + cents; c.verse = (c.verse || 0) + cents; (c.historique = c.historique || []).push({ ts: Date.now(), cents, mode: 'manuel' }); } else c.actif = m2[2] === 'activer';
+          if (m2[2] === 'liberer') c.device = null; else if (m2[2] === 'crediter') { const bb = await readBody(req, 500).catch(() => ({})); const cents = Math.round(Number(bb.euros || 2) * 100); if (!(cents > 0 && cents <= 100000)) return send(res, 400, { error: 'montant invalide' }); c.verse = (c.verse || 0) + cents; acces.cagnotte.verse += cents; acces.cagnotte.solde += cents; (c.historique = c.historique || []).push({ ts: Date.now(), cents, mode: 'manuel' }); } else c.actif = m2[2] === 'activer';
           if (!c.actif) for (const [sid, ss] of Object.entries(sessions)) if (ss.code === m2[1]) delete sessions[sid];
           saveAcces(); saveSessions(); return send(res, 200, { ok: true }); }
         return send(res, 404, { error: 'route inconnue' });
@@ -494,13 +516,14 @@ const server = http.createServer(async (req, res) => {
       if (p === '/api/lire' && req.method === 'POST') {
         if (!API_KEY) return send(res, 501, { error: 'pas de clé API' });
         const ss = sessionDe(req), cc = ss.role === 'user' ? acces.codes[ss.code] : null;
-        if (cc && (cc.solde || 0) < PRIX_SCAN) return send(res, 402, { error: 'credit', solde: cc.solde || 0 });
+        if (cc && acces.cagnotte.solde <= 0) return send(res, 402, { error: 'cagnotte', cagnotte: etatCagnotte(ss.code) });   // cagnotte vide = plus de lecture IA
         const b = await readBody(req);
         const b64 = String(b.image || '').replace(/^data:image\/\w+;base64,/, '');
         if (!b64) return send(res, 400, { error: 'image manquante' });
         try {
           const out = await lireEtiquette(b64);
-          if (cc) { cc.solde = (cc.solde || 0) - PRIX_SCAN; cc.scans = (cc.scans || 0) + 1; saveAcces(); out.solde = cc.solde; }
+          const k = acces.cagnotte; k.solde -= out._cout; k.depense += out._cout; k.lectures++;   // coût réel, toutes lectures confondues
+          if (cc) cc.scans = (cc.scans || 0) + 1; saveAcces(); delete out._cout; out.cagnotte = etatCagnotte(ss.code);
           return send(res, 200, out);
         }
         catch (e) { console.error('lecture:', e.message); return send(res, 502, { error: e.message }); }
