@@ -137,6 +137,9 @@ select{font:16px Inter,sans-serif;padding:11px 12px;border:1.5px solid var(--lin
   <ul id="list"></ul>
   <p class="note" id="store"></p>
   <p class="note" id="learnNote"></p>
+  <section id="adminBox" hidden style="margin-top:22px"><h2 style="margin:0 0 8px">Codes d'accès (admin)</h2>
+    <button class="btn" id="newCode" type="button" style="width:100%">+ Créer un code offert</button>
+    <ul id="codesList" style="margin-top:10px"></ul></section>
   <p class="note"><button class="link" id="testAlarm" type="button">Tester l'alarme</button></p>
 </div>
 
@@ -145,7 +148,14 @@ select{font:16px Inter,sans-serif;padding:11px 12px;border:1.5px solid var(--lin
 <div class="alarm" id="alarm" role="alertdialog" aria-labelledby="atit"><b id="atit">DÉJÀ SCANNÉ</b><p id="amsg"></p>
   <div class="choix"><button id="chRemis" type="button">✓ Remis à la personne</button><button id="chStock" type="button">📦 Garder en stock</button><button id="chNew" type="button">➕ C'est un nouveau colis</button></div>
   <button class="link" id="chCancel" type="button" style="color:#fff">Annuler</button></div>
-<div class="login" id="login"><form id="lf"><h2 style="margin-bottom:12px">Scan colis</h2><label>Mot de passe<input id="pw" type="password" autocomplete="current-password" required></label><button class="btn main" type="submit" style="width:100%;margin-top:12px">Entrer</button><div class="status err" id="lerr"></div></form></div>
+<div class="login" id="login"><form id="lf"><h2 style="margin-bottom:6px">Scan colis</h2>
+  <p class="hint" style="text-align:left;margin:0 0 12px">L'app du vaguemestre : photo de l'étiquette → colis enregistré, doublons détectés, message au destinataire.</p>
+  <div id="codeBox" style="display:none;background:#e3f4ea;color:#0f4a2b;border-radius:10px;padding:12px;margin-bottom:12px"><b>Paiement reçu ✓ Ton code :</b><div id="codeVal" style="font:800 28px Archivo,sans-serif;letter-spacing:.06em;margin:4px 0"></div><small>Note-le : il ne marche que sur ce téléphone.</small></div>
+  <label>Code d'accès<input id="pw" type="password" autocomplete="current-password" autocapitalize="characters" placeholder="XXXX-XXXX" required></label>
+  <button class="btn main" type="submit" style="width:100%;margin-top:12px">Entrer</button>
+  <div class="status err" id="lerr"></div>
+  <button class="btn" type="button" id="buyBtn" style="width:100%;margin-top:14px">Pas de code ? Acheter l'accès (5 €)</button>
+  <p class="hint" style="margin-top:6px">Paiement sécurisé par carte (Stripe). Un code = un téléphone, accès illimité.</p></form></div>
 
 <script>
 {
@@ -427,15 +437,28 @@ $('undo').onclick=async()=>{if(!lastDel)return;const u=lastDel;lastDel=null;$('t
   try{const j=await api(`/api/colis/${encodeURIComponent(u.id)}/etat`,{method:'POST',body:{etat:u.etat}});const k=items.findIndex(i=>i.id===j.item.id);if(k>=0)items[k]=j.item;ver=j.version;render()}catch(e){}};
 
 /* ---------- connexion ---------- */
+let DEVICE='';try{DEVICE=localStorage.getItem('device')||'';if(!DEVICE){DEVICE=Array.from(crypto.getRandomValues(new Uint8Array(16)),x=>x.toString(16).padStart(2,'0')).join('');localStorage.setItem('device',DEVICE)}}catch(e){}
 function showLogin(){$('login').style.display='flex';setTimeout(()=>$('pw').focus(),50)}
 $('lf').onsubmit=async e=>{e.preventDefault();$('lerr').textContent='';
-  try{await api('/api/login',{method:'POST',body:{password:$('pw').value}});$('pw').value='';$('login').style.display='none';start()}
+  try{await api('/api/login',{method:'POST',body:{password:$('pw').value,device:DEVICE}});$('pw').value='';$('codeBox').style.display='none';$('login').style.display='none';start()}
   catch(err){$('lerr').textContent=err.error||'Erreur de connexion'}};
+$('buyBtn').onclick=async()=>{$('lerr').textContent='';$('buyBtn').disabled=true;
+  try{const j=await api('/api/payer',{method:'POST'});location.href=j.url}catch(err){$('lerr').textContent=err.error||'Paiement indisponible';$('buyBtn').disabled=false}};
 $('logout').onclick=async()=>{try{await api('/api/logout',{method:'POST'})}catch(e){}items=[];ver=0;render();showLogin()};
+// retour du paiement Stripe : on récupère le code et on connecte
+(async()=>{const id=new URLSearchParams(location.search).get('paye');if(!id)return;history.replaceState(null,'','/');
+  try{const j=await api('/api/code-paye',{method:'POST',body:{session:id}});$('codeVal').textContent=j.code;$('codeBox').style.display='block';$('pw').value=j.code;showLogin()}
+  catch(err){showLogin();$('lerr').textContent=err.error||'Paiement non retrouvé'}})();
+// admin : gestion des codes
+async function loadCodes(){try{const j=await api('/api/admin/codes');const L=Object.entries(j.codes).sort((a,b)=>b[1].cree-a[1].cree);
+  $('codesList').innerHTML=L.length?L.map(([c,v])=>`<li class="item" style="grid-template-columns:minmax(0,1fr) auto"><div><b style="font:800 17px Archivo">${esc(c)}</b> <span class="pr">${v.source==='stripe'?'payé 5 €':'offert'}${v.email?' · '+esc(v.email):''}</span><div class="dt">${v.actif?(v.device?'utilisé sur un téléphone':'pas encore utilisé'):'désactivé'} · ${esc(fmt(v.cree))}</div></div>
+    <div style="display:grid;gap:6px">${v.device?`<button class="cp" data-c="${esc(c)}" data-a="liberer" type="button">Changer de tél.</button>`:''}<button class="cp" data-c="${esc(c)}" data-a="${v.actif?'desactiver':'activer'}" type="button">${v.actif?'Désactiver':'Réactiver'}</button></div></li>`).join(''):'<li class="empty">Aucun code pour l\'instant.</li>'}catch(e){}}
+$('newCode').onclick=async()=>{try{const j=await api('/api/admin/codes',{method:'POST'});await loadCodes();status('Code créé : '+j.code,'ok')}catch(e){}};
+$('codesList').onclick=async e=>{const b=e.target.closest('button[data-a]');if(!b)return;try{await api(`/api/admin/codes/${b.dataset.c}/${b.dataset.a}`,{method:'POST'});loadCodes()}catch(err){}};
 
 let poll=null;
 async function start(){
-  try{const me=await api('/api/me');lecture=me.lecture;if(me.stats)$('learnNote').textContent=`Apprentissage : ${me.appris} personnes connues · ${me.corrections} corrections retenues · ${me.stats.lectures} lectures${me.stats.cacheLu?` · cache : ${Math.round(me.stats.cacheLu/((me.stats.cacheLu+(me.stats.cacheEcrit||0))||1)*100)} % des consignes relues à prix réduit`:''}`;SIGN=me.signature||SIGN;$('vg').textContent='Vaguemestre : '+SIGN+' · date et heure de réception automatiques'}catch(e){return}
+  try{const me=await api('/api/me');lecture=me.lecture;$('adminBox').hidden=me.role!=='admin';$('learnNote').hidden=me.role!=='admin';if(me.role==='admin')loadCodes();if(me.stats)$('learnNote').textContent=`Apprentissage : ${me.appris} personnes connues · ${me.corrections} corrections retenues · ${me.stats.lectures} lectures${me.stats.cacheLu?` · cache : ${Math.round(me.stats.cacheLu/((me.stats.cacheLu+(me.stats.cacheEcrit||0))||1)*100)} % des consignes relues à prix réduit`:''}`;SIGN=me.signature||SIGN;$('vg').textContent='Vaguemestre : '+SIGN+' · date et heure de réception automatiques'}catch(e){return}
   await refresh();clearInterval(poll);poll=setInterval(refresh,4000);loadZX().catch(()=>{});
 }
 document.addEventListener('touchend',unlockAudio,{once:true});document.addEventListener('click',unlockAudio,{once:true});

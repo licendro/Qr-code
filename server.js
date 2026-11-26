@@ -47,7 +47,21 @@ for (const c of colis) {
   if (!c.etat) { c.etat = c.validatedAt ? 'reporte' : 'recu'; c.reporteAt = c.validatedAt || null; c.remisAt = null; }
   if (!c.type) c.type = 'C';
 }
-let sessions = new Set(readJson(SESS_FILE, []));
+// sessions : { sid: { role: 'admin' | 'user', code?, device? } } — anciennes sessions (tableau) = ton iPhone → admin
+let sessions = (() => { const r = readJson(SESS_FILE, {}); if (Array.isArray(r)) { const o = {}; for (const sid of r) o[sid] = { role: 'admin' }; return o; } return r; })();
+const saveSessions = () => writeJson(SESS_FILE, sessions);
+// ---------- accès payant : codes ----------
+const ACCES_FILE = path.join(DATA, 'acces.json');
+let acces = readJson(ACCES_FILE, { codes: {}, adminDevice: null, sessionsStripe: {} });
+const saveAcces = () => writeJson(ACCES_FILE, acces);
+const PRIX_CENTIMES = Number(process.env.PRIX_CENTIMES) || 500;
+const STRIPE_KEY = process.env.STRIPE_SECRET_KEY || '';
+const BASE_URL = (process.env.BASE_URL || '').replace(/\/$/, '');
+function nouveauCode() { const A = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'; let c; do { c = Array.from(crypto.randomBytes(8), b => A[b % A.length]).join(''); c = c.slice(0, 4) + '-' + c.slice(4); } while (acces.codes[c]); return c; }
+async function stripe(method, chemin, form) {
+  const r = await fetch((process.env.STRIPE_API_BASE || 'https://api.stripe.com') + '/v1' + chemin, { method, headers: { Authorization: 'Bearer ' + STRIPE_KEY, ...(form ? { 'Content-Type': 'application/x-www-form-urlencoded' } : {}) }, body: form ? new URLSearchParams(form).toString() : undefined });
+  const j = await r.json(); if (!r.ok) throw new Error(j?.error?.message || 'Stripe ' + r.status); return j;
+}
 let version = Date.now();
 
 // ---------- apprentissage : annuaire des personnes + corrections faites à la main ----------
@@ -132,7 +146,9 @@ function cookies(req) {
   }
   return o;
 }
-const authed = req => sessions.has(cookies(req).sid);
+const sessionDe = req => { const s = sessions[cookies(req).sid]; if (!s) return null; if (s.role === 'user') { const c = acces.codes[s.code]; if (!c || !c.actif) return null; } return s; };
+const authed = req => !!sessionDe(req);
+const cookieSid = (req, sid) => `sid=${sid}; Path=/; HttpOnly; SameSite=Lax; Max-Age=31536000${isHttps(req) ? '; Secure' : ''}`;
 const isHttps = req => req.headers['x-forwarded-proto'] === 'https';
 
 // ---------- lecture d'étiquette par Claude (si clé API) ----------
@@ -262,24 +278,64 @@ const server = http.createServer(async (req, res) => {
   try {
     if (p === '/api/login' && req.method === 'POST') {
       const b = await readBody(req, 10000);
-      const a = Buffer.from(String(b.password || '')), e = Buffer.from(PASSWORD);
-      if (a.length !== e.length || !crypto.timingSafeEqual(a, e)) {
-        await new Promise(r => setTimeout(r, 1200));
-        return send(res, 401, { error: 'Mot de passe incorrect' });
+      const saisie = String(b.password || b.code || '').trim(), device = String(b.device || '').slice(0, 64);
+      const a = Buffer.from(saisie), e = Buffer.from(PASSWORD);
+      if (a.length === e.length && crypto.timingSafeEqual(a, e)) {
+        // accès illimité : réservé au premier appareil connecté en admin (ton iPhone)
+        if (acces.adminDevice && device !== acces.adminDevice) { await new Promise(r => setTimeout(r, 1200)); return send(res, 403, { error: 'Accès admin réservé à un autre appareil' }); }
+        if (!acces.adminDevice && device) { acces.adminDevice = device; saveAcces(); }
+        const sid = crypto.randomBytes(32).toString('hex'); sessions[sid] = { role: 'admin', device }; saveSessions();
+        return send(res, 200, { ok: true, role: 'admin' }, { 'Set-Cookie': cookieSid(req, sid) });
       }
-      const sid = crypto.randomBytes(32).toString('hex');
-      sessions.add(sid); writeJson(SESS_FILE, [...sessions]);
-      return send(res, 200, { ok: true }, { 'Set-Cookie': `sid=${sid}; Path=/; HttpOnly; SameSite=Lax; Max-Age=31536000${isHttps(req) ? '; Secure' : ''}` });
+      const code = saisie.toUpperCase().replace(/[^A-Z0-9]/g, '').replace(/^(.{4})(.{4})$/, '$1-$2');
+      const c = acces.codes[code];
+      if (!c || !c.actif) { await new Promise(r => setTimeout(r, 1200)); return send(res, 401, { error: 'Code incorrect' }); }
+      if (c.device && device && c.device !== device) return send(res, 403, { error: 'Ce code est déjà utilisé sur un autre téléphone' });
+      if (!c.device && device) { c.device = device; c.premiereUtilisation = Date.now(); saveAcces(); }
+      const sid = crypto.randomBytes(32).toString('hex'); sessions[sid] = { role: 'user', code, device }; saveSessions();
+      return send(res, 200, { ok: true, role: 'user' }, { 'Set-Cookie': cookieSid(req, sid) });
+    }
+    // ----- paiement Stripe : 5 € → un code -----
+    if (p === '/api/payer' && req.method === 'POST') {
+      if (!STRIPE_KEY) return send(res, 501, { error: 'Paiement en ligne pas encore activé : demande un code au vaguemestre.' });
+      const base = BASE_URL || ((isHttps(req) ? 'https://' : 'http://') + req.headers.host);
+      const cs = await stripe('POST', '/checkout/sessions', {
+        mode: 'payment', 'line_items[0][quantity]': '1', 'line_items[0][price_data][currency]': 'eur',
+        'line_items[0][price_data][unit_amount]': String(PRIX_CENTIMES), 'line_items[0][price_data][product_data][name]': 'Accès Scan colis',
+        success_url: base + '/?paye={CHECKOUT_SESSION_ID}', cancel_url: base + '/'
+      });
+      return send(res, 200, { url: cs.url });
+    }
+    if (p === '/api/code-paye' && req.method === 'POST') {
+      const b = await readBody(req, 2000); const id = String(b.session || '');
+      if (!STRIPE_KEY || !/^cs_[A-Za-z0-9_]+$/.test(id)) return send(res, 400, { error: 'paiement inconnu' });
+      if (acces.sessionsStripe[id]) return send(res, 200, { code: acces.sessionsStripe[id] });
+      const cs = await stripe('GET', '/checkout/sessions/' + encodeURIComponent(id));
+      if (cs.payment_status !== 'paid') return send(res, 402, { error: 'Paiement non confirmé' });
+      const code = nouveauCode(); acces.codes[code] = { actif: true, cree: Date.now(), source: 'stripe', session: id, email: cs.customer_details?.email || '' };
+      acces.sessionsStripe[id] = code; saveAcces();
+      return send(res, 200, { code });
     }
     if (p.startsWith('/api/')) {
       if (!authed(req)) return send(res, 401, { error: 'non connecté' });
 
       if (p === '/api/logout' && req.method === 'POST') {
-        sessions.delete(cookies(req).sid); writeJson(SESS_FILE, [...sessions]);
+        delete sessions[cookies(req).sid]; saveSessions();
         return send(res, 200, { ok: true }, { 'Set-Cookie': 'sid=; Path=/; Max-Age=0' });
       }
-      if (p === '/api/me') return send(res, 200, { ok: true, lecture: API_KEY ? 'claude' : 'locale', signature: SIGNATURE, appris: Object.keys(learn.personnes).length, corrections: learn.corrections.length, stats: learn.stats });
+      if (p === '/api/me') return send(res, 200, { ok: true, role: sessionDe(req).role, lecture: API_KEY ? 'claude' : 'locale', signature: SIGNATURE, appris: Object.keys(learn.personnes).length, corrections: learn.corrections.length, stats: learn.stats });
 
+      if (p.startsWith('/api/admin/')) {
+        if (sessionDe(req).role !== 'admin') return send(res, 403, { error: 'réservé à l\'admin' });
+        if (p === '/api/admin/codes' && req.method === 'GET') return send(res, 200, { codes: acces.codes, stripe: !!STRIPE_KEY, prix: PRIX_CENTIMES });
+        if (p === '/api/admin/codes' && req.method === 'POST') { const code = nouveauCode(); acces.codes[code] = { actif: true, cree: Date.now(), source: 'offert' }; saveAcces(); return send(res, 200, { code }); }
+        const m2 = p.match(/^\/api\/admin\/codes\/([A-Z0-9-]{9})\/(liberer|desactiver|activer)$/);
+        if (m2 && req.method === 'POST') { const c = acces.codes[m2[1]]; if (!c) return send(res, 404, { error: 'code inconnu' });
+          if (m2[2] === 'liberer') c.device = null; else c.actif = m2[2] === 'activer';
+          if (!c.actif) for (const [sid, ss] of Object.entries(sessions)) if (ss.code === m2[1]) delete sessions[sid];
+          saveAcces(); saveSessions(); return send(res, 200, { ok: true }); }
+        return send(res, 404, { error: 'route inconnue' });
+      }
       if (p === '/api/colis' && req.method === 'GET') {
         if (url.searchParams.get('v') === String(version)) return send(res, 200, { same: true, version });
         return send(res, 200, { version, items: colis });
