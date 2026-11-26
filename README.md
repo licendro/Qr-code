@@ -66,8 +66,8 @@ Le dossier `data/` n'est pas suivi par git, donc une mise à jour ne l'efface ja
 
 ## Crédit prépayé (pas de bénéfice : ça paie seulement l'API)
 
-- Chacun paie le montant qu'il veut (2 € minimum) par carte via Stripe Checkout → reçoit un **code** (affiché + écrit sur le reçu Stripe). Un code = un téléphone.
-- Chaque lecture d'étiquette par l'IA retire **5 centimes** du crédit du code ; les doublons repérés par code-barres et la saisie à la main sont gratuits. Bouton « Recharger ».
+- Participation aux frais : par carte via Stripe (si activé, 2 € minimum) ou en direct à l'admin qui ajoute le crédit (« + Crédit ») → reçoit un **code** (affiché + écrit sur le reçu Stripe). Un code = un téléphone.
+- Chaque lecture d'étiquette par l'IA retire **3 centimes** du crédit du code ; les doublons repérés par code-barres et la saisie à la main sont gratuits. Bouton « Recharger ».
 - `APP_PASSWORD` = **admin illimité et gratuit**, verrouillé sur le premier téléphone qui s'en sert. Panneau « Codes d'accès » : code offert (2 € de crédit), +2 €, changer de téléphone, désactiver.
 - Le crédit est versé par le **webhook** `checkout.session.completed` / `async_payment_succeeded` (signature vérifiée) et, en secours, par la page de retour (jamais crédité deux fois).
 - Webhook Stripe : `https://colis.jdev-hub.fr/api/stripe-webhook`.

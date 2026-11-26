@@ -54,7 +54,7 @@ const saveSessions = () => writeJson(SESS_FILE, sessions);
 const ACCES_FILE = path.join(DATA, 'acces.json');
 let acces = readJson(ACCES_FILE, { codes: {}, adminDevice: null, sessionsStripe: {} });
 const saveAcces = () => writeJson(ACCES_FILE, acces);
-const PRIX_SCAN = Number(process.env.PRIX_SCAN_CENTIMES) || 5;        // 5 centimes par lecture IA
+const PRIX_SCAN = Number(process.env.PRIX_SCAN_CENTIMES) || 3;        // 3 centimes par lecture IA
 const MIN_RECHARGE = Number(process.env.MIN_RECHARGE_CENTIMES) || 200;  // 2 € minimum, montant libre au-dessus
 const MAX_RECHARGE = 10000;
 const CREDIT_OFFERT = Number(process.env.CREDIT_OFFERT_CENTIMES) || 200; // crédit d'un code offert par l'admin
@@ -321,6 +321,7 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, { ok: true, role: 'user' }, { 'Set-Cookie': cookieSid(req, sid) });
     }
     // ----- paiement Stripe : 5 € → un code -----
+    if (p === '/api/config') return send(res, 200, { stripe: !!STRIPE_KEY, prixScan: PRIX_SCAN, minRecharge: MIN_RECHARGE, contact: process.env.CONTACT_CREDIT || 'Julien MERCERON' });
     if (p === '/api/payer' && req.method === 'POST') {
       if (!STRIPE_KEY) return send(res, 501, { error: 'Paiement en ligne pas encore activé : demande un code au vaguemestre.' });
       const b = await readBody(req, 2000);
@@ -374,7 +375,7 @@ const server = http.createServer(async (req, res) => {
         if (p === '/api/admin/codes' && req.method === 'POST') { const code = nouveauCode(); acces.codes[code] = { actif: true, cree: Date.now(), source: 'offert', solde: CREDIT_OFFERT }; saveAcces(); return send(res, 200, { code }); }
         const m2 = p.match(/^\/api\/admin\/codes\/([A-Z0-9-]{9})\/(liberer|desactiver|activer|crediter)$/);
         if (m2 && req.method === 'POST') { const c = acces.codes[m2[1]]; if (!c) return send(res, 404, { error: 'code inconnu' });
-          if (m2[2] === 'liberer') c.device = null; else if (m2[2] === 'crediter') c.solde = (c.solde || 0) + 200; else c.actif = m2[2] === 'activer';
+          if (m2[2] === 'liberer') c.device = null; else if (m2[2] === 'crediter') { const bb = await readBody(req, 500).catch(() => ({})); const cents = Math.round(Number(bb.euros || 2) * 100); if (!(cents > 0 && cents <= 100000)) return send(res, 400, { error: 'montant invalide' }); c.solde = (c.solde || 0) + cents; c.verse = (c.verse || 0) + cents; (c.historique = c.historique || []).push({ ts: Date.now(), cents, mode: 'manuel' }); } else c.actif = m2[2] === 'activer';
           if (!c.actif) for (const [sid, ss] of Object.entries(sessions)) if (ss.code === m2[1]) delete sessions[sid];
           saveAcces(); saveSessions(); return send(res, 200, { ok: true }); }
         return send(res, 404, { error: 'route inconnue' });
