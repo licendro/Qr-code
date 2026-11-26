@@ -34,10 +34,24 @@ const DB_FILE = path.join(DATA, 'colis.json');
 const SESS_FILE = path.join(DATA, 'sessions.json');
 fs.mkdirSync(path.join(DATA, 'backups'), { recursive: true });
 
-const readJson = (f, d) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch (e) { return d; } };
+// ---------- chiffrement au repos (AES-256-GCM) : les fichiers de data/ sont illisibles sans DATA_KEY ----------
+let DATA_KEY = process.env.DATA_KEY || '';
+if (!/^[0-9a-f]{64}$/i.test(DATA_KEY)) {
+  DATA_KEY = crypto.randomBytes(32).toString('hex');
+  fs.appendFileSync(path.join(ROOT, '.env'), `\n# Clé de chiffrement des données (générée automatiquement) — à sauvegarder hors du VPS, sans elle les données sont perdues\nDATA_KEY=${DATA_KEY}\n`);
+  console.log('🔐 Nouvelle clé DATA_KEY générée et ajoutée à .env — sauvegarde-la hors du VPS.');
+}
+const CLE = Buffer.from(DATA_KEY, 'hex');
+function chiffrer(txt) { const iv = crypto.randomBytes(12), c = crypto.createCipheriv('aes-256-gcm', CLE, iv); const d = Buffer.concat([c.update(txt, 'utf8'), c.final()]);
+  return JSON.stringify({ chiffre: 1, iv: iv.toString('base64'), tag: c.getAuthTag().toString('base64'), data: d.toString('base64') }); }
+function dechiffrer(raw) { const o = JSON.parse(raw); if (!o || o.chiffre !== 1) return raw; // ancien fichier en clair : lu puis réécrit chiffré
+  const dc = crypto.createDecipheriv('aes-256-gcm', CLE, Buffer.from(o.iv, 'base64')); dc.setAuthTag(Buffer.from(o.tag, 'base64'));
+  return Buffer.concat([dc.update(Buffer.from(o.data, 'base64')), dc.final()]).toString('utf8'); }
+const readJson = (f, d) => { let raw; try { raw = fs.readFileSync(f, 'utf8'); } catch (e) { return d; }
+  try { return JSON.parse(dechiffrer(raw)); } catch (e) { console.error('⚠ Impossible de lire', path.basename(f), '(mauvaise DATA_KEY ?)'); process.exit(1); } };
 function writeJson(f, v) {
   const tmp = f + '.tmp';
-  fs.writeFileSync(tmp, JSON.stringify(v, null, 1));
+  fs.writeFileSync(tmp, chiffrer(JSON.stringify(v)), { mode: 0o600 });
   fs.renameSync(tmp, f);
 }
 
@@ -137,13 +151,33 @@ function save() {
   writeJson(DB_FILE, colis);
   const day = new Date().toISOString().slice(0, 10);
   const bk = path.join(DATA, 'backups', `colis-${day}.json`);
-  try { fs.copyFileSync(DB_FILE, bk); } catch (e) {}
-  // garde 60 jours de sauvegardes
+  try { fs.copyFileSync(DB_FILE, bk); fs.chmodSync(bk, 0o600); } catch (e) {}   // copie déjà chiffrée
+  // conservation : 14 jours de sauvegardes seulement
   try {
     const files = fs.readdirSync(path.join(DATA, 'backups')).sort();
-    for (const f of files.slice(0, Math.max(0, files.length - 60))) fs.unlinkSync(path.join(DATA, 'backups', f));
+    for (const f of files.slice(0, Math.max(0, files.length - 14))) fs.unlinkSync(path.join(DATA, 'backups', f));
   } catch (e) {}
 }
+
+// ---------- durée de conservation (RGPD) : effacement automatique ----------
+const JOURS_REMIS = Number(process.env.CONSERVATION_REMIS_JOURS) || 30;   // colis remis : 30 jours (le registre papier fait foi)
+const JOURS_MAX = Number(process.env.CONSERVATION_MAX_JOURS) || 90;       // tout colis : 90 jours maximum
+const JOURS_ANNUAIRE = Number(process.env.CONSERVATION_ANNUAIRE_JOURS) || 120; // personne non revue depuis 120 jours
+function purger() {
+  const now = Date.now(), J = 864e5, avant = colis.length;
+  colis = colis.filter(c => !(c.etat === 'remis' && c.remisAt && now - c.remisAt > JOURS_REMIS * J) && now - c.ts <= JOURS_MAX * J);
+  if (colis.length !== avant) { save(); console.log(`🧹 ${avant - colis.length} colis effacés (durée de conservation)`); }
+  if (typeof learn !== 'undefined') {
+    let n = 0; for (const [k, p] of Object.entries(learn.personnes)) if (now - (p.last || 0) > JOURS_ANNUAIRE * J) { delete learn.personnes[k]; n++; }
+    const c0 = learn.corrections.length; learn.corrections = learn.corrections.filter(x => now - (x.ts || 0) <= JOURS_ANNUAIRE * J);
+    if (n || c0 !== learn.corrections.length) saveLearn();
+  }
+  // anciennes sauvegardes en clair (avant le chiffrement) : effacées
+  try { for (const f of fs.readdirSync(path.join(DATA, 'backups'))) { const fp = path.join(DATA, 'backups', f); if (!fs.readFileSync(fp, 'utf8').startsWith('{"chiffre":1')) fs.unlinkSync(fp); } } catch (e) {}
+  for (const [sid, ss] of Object.entries(sessions)) if (ss.role === 'user' && (!ss.debut || now - ss.debut > 24 * 3600e3 * 2)) delete sessions[sid];
+  saveSessions();
+}
+setTimeout(purger, 5000); setInterval(purger, 6 * 3600e3);
 
 // FR1283838 et 1283838 = même colis
 const numKey = n => String(n || '').toUpperCase().replace(/[^A-Z0-9]/g, '').replace(/^FR/, '');
@@ -171,9 +205,16 @@ function cookies(req) {
   }
   return o;
 }
-const sessionDe = req => { const s = sessions[cookies(req).sid]; if (!s) return null; if (s.role === 'user') { const c = acces.codes[s.code]; if (!c || !c.actif) return null; } return s; };
+const tentatives = {};
+const DUREE_SESSION_H = Number(process.env.DUREE_SESSION_HEURES) || 24;
+const sessionDe = req => { const sid = cookies(req).sid, s = sessions[sid]; if (!s) return null;
+  if (s.role === 'user') {
+    const c = acces.codes[s.code];
+    if (!c || !c.actif || !s.debut || Date.now() - s.debut > DUREE_SESSION_H * 3600e3) { delete sessions[sid]; saveSessions(); return null; }
+  }
+  return s; };
 const authed = req => !!sessionDe(req);
-const cookieSid = (req, sid) => `sid=${sid}; Path=/; HttpOnly; SameSite=Lax; Max-Age=31536000${isHttps(req) ? '; Secure' : ''}`;
+const cookieSid = (req, sid, age = 31536000) => `sid=${sid}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${age}${isHttps(req) ? '; Secure' : ''}`;
 const isHttps = req => req.headers['x-forwarded-proto'] === 'https';
 
 // ---------- lecture d'étiquette par Claude (si clé API) ----------
@@ -297,11 +338,19 @@ function analyser(txt) {
 // ---------- routes ----------
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.png': 'image/png', '.svg': 'image/svg+xml', '.webmanifest': 'application/manifest+json' };
 
+const CSP = "default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' https://unpkg.com https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: blob:; connect-src 'self' https://cdn.jsdelivr.net https://unpkg.com; worker-src 'self' blob:; frame-ancestors 'none'; base-uri 'none'; form-action 'self'";
 const server = http.createServer(async (req, res) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff'); res.setHeader('Referrer-Policy', 'no-referrer'); res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Permissions-Policy', 'camera=(self), microphone=(), geolocation=()'); res.setHeader('Content-Security-Policy', CSP);
+  if (isHttps(req)) res.setHeader('Strict-Transport-Security', 'max-age=31536000');
   const url = new URL(req.url, 'http://x');
   const p = url.pathname;
   try {
     if (p === '/api/login' && req.method === 'POST') {
+      const ip = String(req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
+      const t = (tentatives[ip] = (tentatives[ip] || []).filter(x => Date.now() - x < 15 * 60e3));
+      if (t.length >= 8) return send(res, 429, { error: 'Trop d\'essais, réessaie dans 15 minutes' });
+      t.push(Date.now());
       const b = await readBody(req, 10000);
       const saisie = String(b.password || b.code || '').trim(), device = String(b.device || '').slice(0, 64);
       const a = Buffer.from(saisie), e = Buffer.from(PASSWORD);
@@ -309,7 +358,7 @@ const server = http.createServer(async (req, res) => {
         // accès illimité : réservé au premier appareil connecté en admin (ton iPhone)
         if (acces.adminDevice && device !== acces.adminDevice) { await new Promise(r => setTimeout(r, 1200)); return send(res, 403, { error: 'Accès admin réservé à un autre appareil' }); }
         if (!acces.adminDevice && device) { acces.adminDevice = device; saveAcces(); }
-        const sid = crypto.randomBytes(32).toString('hex'); sessions[sid] = { role: 'admin', device }; saveSessions();
+        delete tentatives[ip]; const sid = crypto.randomBytes(32).toString('hex'); sessions[sid] = { role: 'admin', device }; saveSessions();
         return send(res, 200, { ok: true, role: 'admin' }, { 'Set-Cookie': cookieSid(req, sid) });
       }
       const code = saisie.toUpperCase().replace(/[^A-Z0-9]/g, '').replace(/^(.{4})(.{4})$/, '$1-$2');
@@ -317,8 +366,8 @@ const server = http.createServer(async (req, res) => {
       if (!c || !c.actif) { await new Promise(r => setTimeout(r, 1200)); return send(res, 401, { error: 'Code incorrect' }); }
       if (c.device && device && c.device !== device) return send(res, 403, { error: 'Ce code est déjà utilisé sur un autre téléphone' });
       if (!c.device && device) { c.device = device; c.premiereUtilisation = Date.now(); saveAcces(); }
-      const sid = crypto.randomBytes(32).toString('hex'); sessions[sid] = { role: 'user', code, device }; saveSessions();
-      return send(res, 200, { ok: true, role: 'user' }, { 'Set-Cookie': cookieSid(req, sid) });
+      delete tentatives[ip]; const sid = crypto.randomBytes(32).toString('hex'); sessions[sid] = { role: 'user', code, device, debut: Date.now() }; saveSessions();
+      return send(res, 200, { ok: true, role: 'user', expire: Date.now() + DUREE_SESSION_H * 3600e3 }, { 'Set-Cookie': cookieSid(req, sid, DUREE_SESSION_H * 3600) });
     }
     // ----- paiement Stripe : 5 € → un code -----
     if (p === '/api/config') return send(res, 200, { stripe: !!STRIPE_KEY, prixScan: PRIX_SCAN, minRecharge: MIN_RECHARGE, contact: process.env.CONTACT_CREDIT || 'Julien MERCERON' });
@@ -365,7 +414,7 @@ const server = http.createServer(async (req, res) => {
 
       if (p === '/api/logout' && req.method === 'POST') {
         delete sessions[cookies(req).sid]; saveSessions();
-        return send(res, 200, { ok: true }, { 'Set-Cookie': 'sid=; Path=/; Max-Age=0' });
+        return send(res, 200, { ok: true }, { 'Set-Cookie': 'sid=; Path=/; Max-Age=0', 'Clear-Site-Data': '"cache"' });
       }
       if (p === '/api/me') { const ss = sessionDe(req), cc = ss.code ? acces.codes[ss.code] : null; return send(res, 200, { ok: true, role: ss.role, code: ss.code || null, solde: cc ? cc.solde || 0 : null, prixScan: PRIX_SCAN, minRecharge: MIN_RECHARGE, lecture: API_KEY ? 'claude' : 'locale', signature: SIGNATURE, appris: Object.keys(learn.personnes).length, corrections: learn.corrections.length, stats: learn.stats }); }
 
@@ -373,6 +422,15 @@ const server = http.createServer(async (req, res) => {
         if (sessionDe(req).role !== 'admin') return send(res, 403, { error: 'réservé à l\'admin' });
         if (p === '/api/admin/codes' && req.method === 'GET') return send(res, 200, { codes: acces.codes, stripe: !!STRIPE_KEY, prixScan: PRIX_SCAN });
         if (p === '/api/admin/codes' && req.method === 'POST') { const code = nouveauCode(); acces.codes[code] = { actif: true, cree: Date.now(), source: 'offert', solde: CREDIT_OFFERT }; saveAcces(); return send(res, 200, { code }); }
+        if (p === '/api/admin/deconnecter-tous' && req.method === 'POST') { for (const [sid, ss] of Object.entries(sessions)) if (ss.role !== 'admin') delete sessions[sid]; saveSessions(); return send(res, 200, { ok: true }); }
+        if (p === '/api/admin/effacer-personne' && req.method === 'POST') {   // droit à l'effacement (RGPD)
+          const bb = await readBody(req, 2000); const k = plain(bb.nom); if (k.length < 2) return send(res, 400, { error: 'nom manquant' });
+          const avant = colis.length; colis = colis.filter(c => plain(c.nom) !== k); delete learn.personnes[k];
+          learn.corrections = learn.corrections.filter(x => plain(x.lu) !== k && plain(x.correct) !== k);
+          save(); saveLearn(); return send(res, 200, { ok: true, colisSupprimes: avant - colis.length });
+        }
+        const m3 = p.match(/^\/api\/admin\/codes\/([A-Z0-9-]{9})$/);
+        if (m3 && req.method === 'DELETE') { delete acces.codes[m3[1]]; for (const [sid, ss] of Object.entries(sessions)) if (ss.code === m3[1]) delete sessions[sid]; saveAcces(); saveSessions(); return send(res, 200, { ok: true }); }
         const m2 = p.match(/^\/api\/admin\/codes\/([A-Z0-9-]{9})\/(liberer|desactiver|activer|crediter)$/);
         if (m2 && req.method === 'POST') { const c = acces.codes[m2[1]]; if (!c) return send(res, 404, { error: 'code inconnu' });
           if (m2[2] === 'liberer') c.device = null; else if (m2[2] === 'crediter') { const bb = await readBody(req, 500).catch(() => ({})); const cents = Math.round(Number(bb.euros || 2) * 100); if (!(cents > 0 && cents <= 100000)) return send(res, 400, { error: 'montant invalide' }); c.solde = (c.solde || 0) + cents; c.verse = (c.verse || 0) + cents; (c.historique = c.historique || []).push({ ts: Date.now(), cents, mode: 'manuel' }); } else c.actif = m2[2] === 'activer';

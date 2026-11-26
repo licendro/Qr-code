@@ -137,9 +137,12 @@ select{font:16px Inter,sans-serif;padding:11px 12px;border:1.5px solid var(--lin
   <div class="search"><input id="q" type="search" placeholder="Rechercher nom, numéro, Cie…"></div>
   <ul id="list"></ul>
   <p class="note" id="store"></p>
+  <p class="note"><a href="/confidentialite.html" style="color:inherit">Confidentialité et données personnelles</a></p>
   <p class="note" id="learnNote"></p>
   <section id="adminBox" hidden style="margin-top:22px"><h2 style="margin:0 0 8px">Codes d'accès (admin)</h2>
     <button class="btn" id="newCode" type="button" style="width:100%">+ Créer un code offert</button>
+    <button class="btn" id="logoutAll" type="button" style="width:100%;margin-top:8px">Déconnecter tous les téléphones (sauf le mien)</button>
+    <form id="effForm" style="display:flex;gap:8px;margin-top:8px"><input id="effNom" placeholder="NOM à effacer (droit à l'effacement)"><button class="btn" type="submit">Effacer</button></form>
     <ul id="codesList" style="margin-top:10px"></ul></section>
   <p class="note"><button class="link" id="testAlarm" type="button">Tester l'alarme</button></p>
 </div>
@@ -158,21 +161,22 @@ select{font:16px Inter,sans-serif;padding:11px 12px;border:1.5px solid var(--lin
   <div style="margin-top:16px;border-top:1px solid var(--line);padding-top:14px"><b>Pas de code ?</b>
   <p class="hint" id="nocodeTxt" style="text-align:left;margin:4px 0 8px">L'app est gratuite : tu participes seulement aux frais de lecture des étiquettes par l'IA, <span class="prixScan">3</span> centimes par scan, sans bénéfice.</p>
   <div style="display:flex;gap:8px" id="payBox"><input id="montant" type="number" inputmode="decimal" min="2" step="0.5" value="5" aria-label="Montant en euros" style="max-width:110px"><button class="btn" type="button" id="buyBtn" style="flex:1">Payer et obtenir mon code</button></div>
-  <p class="hint" id="montantInfo" style="margin-top:6px"></p></div></form></div>
+  <p class="hint" id="montantInfo" style="margin-top:6px"></p></div>
+  <p class="hint" style="margin-top:12px">Accès valable 24 h, puis retape ton code. <a href="/confidentialite.html" style="color:inherit">Données personnelles</a></p></form></div>
 
 <script>
 {
 const $=id=>document.getElementById(id);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const numKey=n=>String(n||'').toUpperCase().replace(/[^A-Z0-9]/g,'').replace(/^FR/,'');
-let tab='recu',ctype='C',items=[],ver=0,lecture='locale',SIGN='Julien MERCERON',lastDel=null,toastT=null,actx=null;
+let estConnecte=false,tab='recu',ctype='C',items=[],ver=0,lecture='locale',SIGN='Julien MERCERON',lastDel=null,toastT=null,actx=null;
 
 const fmt=ts=>{const d=new Date(ts);return d.toLocaleDateString('fr-FR',{day:'2-digit',month:'2-digit',year:'numeric'})+' · '+d.toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'})};
 function status(msg,cls,spin){const s=$('status');s.className='status '+(cls||'');s.innerHTML=(spin?'<span class="spin"></span>':'')+'<span></span>';s.lastChild.textContent=msg||''}
 
 async function api(path,opt={}){
   const r=await fetch(path,{credentials:'same-origin',headers:{'Content-Type':'application/json'},...opt,body:opt.body?JSON.stringify(opt.body):undefined});
-  if(r.status===401&&path!=='/api/login'){showLogin();throw {status:401}}
+  if(r.status===401&&path!=='/api/login'){if(estConnecte){estConnecte=false;items=[];ver=0;render();$('lerr').textContent='Accès terminé (24 h écoulées ou code retiré) : retape ton code.'}showLogin();throw {status:401}}
   const j=await r.json().catch(()=>({}));
   if(!r.ok)throw {status:r.status,...j};
   return j;
@@ -469,16 +473,20 @@ $('logout').onclick=async()=>{try{await api('/api/logout',{method:'POST'})}catch
 // admin : gestion des codes
 async function loadCodes(){try{const j=await api('/api/admin/codes');const L=Object.entries(j.codes).filter(([c,v])=>!v.enAttente).sort((a,b)=>b[1].cree-a[1].cree);
   $('codesList').innerHTML=L.length?L.map(([c,v])=>`<li class="item" style="grid-template-columns:minmax(0,1fr) auto"><div><b style="font:800 17px Archivo">${esc(c)}</b> <span class="pr">${v.source==='stripe'?'versé '+euros(v.verse||0):'offert'} · crédit ${euros(v.solde||0)} · ${v.scans||0} scans${v.email?' · '+esc(v.email):''}</span><div class="dt">${v.actif?(v.device?'utilisé sur un téléphone':'pas encore utilisé'):'désactivé'} · ${esc(fmt(v.cree))}</div></div>
-    <div style="display:grid;gap:6px">${v.device?`<button class="cp" data-c="${esc(c)}" data-a="liberer" type="button">Changer de tél.</button>`:''}<button class="cp" data-c="${esc(c)}" data-a="crediter" type="button">+ Crédit</button><button class="cp" data-c="${esc(c)}" data-a="${v.actif?'desactiver':'activer'}" type="button">${v.actif?'Désactiver':'Réactiver'}</button></div></li>`).join(''):'<li class="empty">Aucun code pour l\'instant.</li>'}catch(e){}}
+    <div style="display:grid;gap:6px">${v.device?`<button class="cp" data-c="${esc(c)}" data-a="liberer" type="button">Changer de tél.</button>`:''}<button class="cp" data-c="${esc(c)}" data-a="crediter" type="button">+ Crédit</button><button class="cp" data-c="${esc(c)}" data-a="supprimer" type="button">Supprimer</button><button class="cp" data-c="${esc(c)}" data-a="${v.actif?'desactiver':'activer'}" type="button">${v.actif?'Désactiver':'Réactiver'}</button></div></li>`).join(''):'<li class="empty">Aucun code pour l\'instant.</li>'}catch(e){}}
+$('logoutAll').onclick=async()=>{if(!confirm('Déconnecter tous les autres téléphones ?'))return;try{await api('/api/admin/deconnecter-tous',{method:'POST'});status('Tous les autres téléphones sont déconnectés.','ok')}catch(e){}};
+$('effForm').onsubmit=async e=>{e.preventDefault();const n=$('effNom').value.trim();if(!n||!confirm('Effacer toutes les données de '+n+' (colis + annuaire) ?'))return;
+  try{const j=await api('/api/admin/effacer-personne',{method:'POST',body:{nom:n}});$('effNom').value='';status(`Données de ${n} effacées (${j.colisSupprimes} colis).`,'ok');refresh()}catch(err){status(err.error||'Erreur','err')}};
 $('newCode').onclick=async()=>{try{const j=await api('/api/admin/codes',{method:'POST'});await loadCodes();status('Code créé : '+j.code,'ok')}catch(e){}};
 $('codesList').onclick=async e=>{const b=e.target.closest('button[data-a]');if(!b)return;let body;
+  if(b.dataset.a==='supprimer'){if(!confirm('Supprimer le code '+b.dataset.c+' ? Le téléphone perd l\'accès immédiatement.'))return;try{await api('/api/admin/codes/'+b.dataset.c,{method:'DELETE'});loadCodes()}catch(err){}return}
   if(b.dataset.a==='crediter'){const r=prompt('Crédit à ajouter sur '+b.dataset.c+' (en euros) :','2');if(r===null)return;body={euros:parseFloat(String(r).replace(',','.'))}}
   try{await api(`/api/admin/codes/${b.dataset.c}/${b.dataset.a}`,{method:'POST',body});loadCodes()}catch(err){status(err.error||'Erreur','err')}};
 
 let poll=null;
 async function start(){
   try{const me=await api('/api/me');lecture=me.lecture;PRIX_SCAN=me.prixScan||3;if(me.role==='user')majCredit(me.solde);else{$('creditBar').hidden=true;$('creditBar').style.display='none'}$('adminBox').hidden=me.role!=='admin';$('learnNote').hidden=me.role!=='admin';if(me.role==='admin')loadCodes();if(me.stats)$('learnNote').textContent=`Apprentissage : ${me.appris} personnes connues · ${me.corrections} corrections retenues · ${me.stats.lectures} lectures${me.stats.cacheLu?` · cache : ${Math.round(me.stats.cacheLu/((me.stats.cacheLu+(me.stats.cacheEcrit||0))||1)*100)} % des consignes relues à prix réduit`:''}`;SIGN=me.signature||SIGN;$('vg').textContent='Vaguemestre : '+SIGN+' · date et heure de réception automatiques'}catch(e){return}
-  await refresh();clearInterval(poll);poll=setInterval(refresh,4000);loadZX().catch(()=>{});
+  estConnecte=true;await refresh();clearInterval(poll);poll=setInterval(refresh,4000);loadZX().catch(()=>{});
 }
 document.addEventListener('touchend',unlockAudio,{once:true});document.addEventListener('click',unlockAudio,{once:true});
 document.addEventListener('visibilitychange',()=>{if(!document.hidden)refresh()});

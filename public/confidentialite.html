@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Confidentialité — Scan colis</title>
+<style>
+:root{color-scheme:light dark;--bg:light-dark(#fffdf8,#1f1a15);--ink:light-dark(#1c1a17,#f6eee2);--mute:light-dark(#6d6155,#c3b39f);--line:light-dark(#e6dccd,#4e4033)}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.6 system-ui,-apple-system,sans-serif}
+main{max-width:720px;margin:0 auto;padding:28px 18px 60px}
+h1{font-size:28px;line-height:1.15;margin:0 0 6px}
+h2{font-size:19px;margin:28px 0 6px}
+p,li{color:var(--ink)}
+.sub{color:var(--mute);margin:0 0 18px}
+table{width:100%;border-collapse:collapse;font-size:15px}
+td,th{border-bottom:1px solid var(--line);padding:8px 6px;text-align:left;vertical-align:top}
+a{color:inherit}
+</style>
+</head>
+<body>
+<main>
+  <p><a href="/">← Retour à l'app</a></p>
+  <h1>Confidentialité et données personnelles</h1>
+  <p class="sub">Informations prévues par les articles 13 et 14 du RGPD.</p>
+
+  <h2>Qui est responsable ?</h2>
+  <p>Julien MERCERON, à titre personnel, pour l'aide au service du vaguemestre de l'École de gendarmerie de Chaumont. L'app n'est pas un outil officiel de la Gendarmerie nationale : le <b>registre papier</b> reste la référence.</p>
+
+  <h2>À quoi servent les données ?</h2>
+  <p>Enregistrer les colis reçus, éviter les doublons, savoir ce qui reste à remettre et prévenir le destinataire. Base légale : l'<b>intérêt légitime</b> à organiser la distribution du courrier (art. 6.1.f du RGPD). Aucune publicité, aucune revente, aucun profilage.</p>
+
+  <h2>Quelles données ?</h2>
+  <ul>
+    <li>Sur l'étiquette du colis : numéro de suivi, nom, prénom, compagnie, transporteur, expéditeur, et parfois un téléphone s'il y est imprimé.</li>
+    <li>Le suivi : dates de réception, de report au registre et de remise.</li>
+    <li>Pour l'accès : un code d'accès, un identifiant aléatoire du téléphone et le crédit restant. Aucun nom n'est demandé aux utilisateurs.</li>
+  </ul>
+  <p>La <b>photo</b> de l'étiquette n'est <b>jamais enregistrée</b> : elle est envoyée pour être lue, puis oubliée.</p>
+
+  <h2>Qui y a accès ?</h2>
+  <ul>
+    <li>Les vaguemestres qui ont un code d'accès. L'accès dure <b>24 heures</b>, puis il faut retaper son code. L'administrateur peut retirer un accès à tout moment.</li>
+    <li><b>Sous-traitants</b> : IONOS, qui héberge le serveur dans l'Union européenne, et Anthropic, qui lit la photo de l'étiquette avec l'IA Claude. Anthropic est située aux États-Unis : ce transfert est encadré par ses clauses contractuelles, et Anthropic indique ne pas utiliser les données de son API pour entraîner ses modèles.</li>
+  </ul>
+
+  <h2>Combien de temps ?</h2>
+  <table>
+    <tr><th>Donnée</th><th>Durée</th></tr>
+    <tr><td>Colis remis</td><td>30 jours après la remise, puis effacement automatique</td></tr>
+    <tr><td>Tout colis, même pas encore remis</td><td>90 jours au maximum</td></tr>
+    <tr><td>Annuaire des noms et compagnies, corrections</td><td>120 jours après le dernier colis de la personne</td></tr>
+    <tr><td>Sauvegardes chiffrées</td><td>14 jours</td></tr>
+    <tr><td>Sessions des téléphones</td><td>24 heures</td></tr>
+    <tr><td>Photos d'étiquettes</td><td>Jamais conservées</td></tr>
+  </table>
+
+  <h2>Sécurité</h2>
+  <ul>
+    <li>Connexion chiffrée (HTTPS) entre le téléphone et le serveur.</li>
+    <li>Données <b>chiffrées sur le serveur</b> (AES-256-GCM) : les fichiers sont illisibles sans la clé.</li>
+    <li>Accès par code personnel, lié à un seul téléphone, et limité en nombre d'essais.</li>
+    <li>Rien n'est gardé sur les téléphones des utilisateurs, à part l'identifiant aléatoire de l'appareil.</li>
+  </ul>
+
+  <h2>Tes droits</h2>
+  <p>Tu peux demander à <b>voir</b>, <b>corriger</b> ou <b>effacer</b> tes données, ou t'opposer à leur traitement. Il suffit de le demander à Julien MERCERON, en personne ou par message : c'est fait sous un mois, en général tout de suite. Si tu estimes que tes droits ne sont pas respectés, tu peux saisir la <a href="https://www.cnil.fr/fr/plaintes">CNIL</a>.</p>
+
+  <p class="sub" style="margin-top:30px">Dernière mise à jour : 26 novembre 2026.</p>
+</main>
+</body>
+</html>

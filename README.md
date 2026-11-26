@@ -73,6 +73,14 @@ Le dossier `data/` n'est pas suivi par git, donc une mise à jour ne l'efface ja
 - Webhook Stripe : `https://colis.jdev-hub.fr/api/stripe-webhook`.
 - Changer le téléphone admin : `cd ~/qr-code && node -e "const f='data/acces.json',a=require('./'+f);a.adminDevice=null;require('fs').writeFileSync(f,JSON.stringify(a,null,1))" && pm2 restart qr-code`
 
+## Données personnelles et sécurité (RGPD)
+
+- Page d'information : `/confidentialite.html` (responsable, finalité, durées, sous-traitants IONOS + Anthropic, droits, CNIL).
+- **Chiffrement au repos** AES-256-GCM de tout `data/` avec `DATA_KEY` (générée au 1er démarrage dans `.env`). **Sauvegarde cette clé hors du VPS** : sans elle, les données sont perdues.
+- **Conservation** : colis remis 30 j, tout colis 90 j max, annuaire 120 j, sauvegardes 14 j, photos jamais stockées (réglable : `CONSERVATION_*_JOURS`).
+- **Accès** : téléphones des utilisateurs déconnectés après 24 h (`DUREE_SESSION_HEURES`), retrait immédiat si le code est supprimé/désactivé ; admin : « Déconnecter tous les téléphones », « Effacer les données d'une personne ».
+- En-têtes de sécurité (CSP, HSTS, anti-iframe), cookies `HttpOnly; Secure; SameSite=Strict`, 8 essais de connexion / 15 min.
+
 ## Vider toute la base (avec sauvegarde)
 
 ```bash
