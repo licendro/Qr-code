@@ -2,7 +2,9 @@
 
 Petite app web pour enregistrer les colis du vaguemestre :
 
-- **scan en direct** (https) : la caméra lit l'étiquette et enregistre seule dès qu'elle a le numéro et le nom ; sinon photo ;
+- photo de l'étiquette (mise au point de l'iPhone) : enregistrement automatique dès qu'elle a le numéro et le nom, bouton « Corriger » ;
+- l'app apprend : annuaire des personnes déjà vues (orthographe + compagnie) et corrections renvoyées à l'IA ;
+- lecture économique : Haiku d'abord, Sonnet seulement si besoin ;
 - lecture par Claude (clé API) : numéro de suivi (Colissimo 6C…, Amazon FR…, Chronopost XN…JB, DPD, DHL…), nom, prénom, compagnie, expéditeur ;
 - tous les numéros de l'étiquette sont gardés : si l'un d'eux a déjà été scanné → **alarme** ;
 - suivi À reporter → À remettre → Remis, message WhatsApp, recherche ;

@@ -17,7 +17,9 @@ try {
 const PORT = Number(process.env.PORT) || 3000;
 const PASSWORD = process.env.APP_PASSWORD || '';
 const API_KEY = process.env.ANTHROPIC_API_KEY || '';
-const MODEL = process.env.ANTHROPIC_MODEL || 'claude-sonnet-5-5';
+// Économie : Haiku (≈ 20× moins cher) lit d'abord ; Sonnet seulement si Haiku n'a pas trouvé le numéro ou le nom.
+const MODEL = process.env.ANTHROPIC_MODEL || 'claude-haiku-5-5';
+const MODEL_FIABLE = process.env.ANTHROPIC_MODEL_FIABLE || 'claude-sonnet-5-5';
 const WORKSPACE = process.env.ANTHROPIC_WORKSPACE_ID || '';
 const SIGNATURE = process.env.SIGNATURE || 'Julien MERCERON';
 if (!PASSWORD || PASSWORD === 'change-moi') {
@@ -46,6 +48,49 @@ for (const c of colis) {
 }
 let sessions = new Set(readJson(SESS_FILE, []));
 let version = Date.now();
+
+// ---------- apprentissage : annuaire des personnes + corrections faites à la main ----------
+const LEARN_FILE = path.join(DATA, 'apprentissage.json');
+let learn = readJson(LEARN_FILE, { personnes: {}, corrections: [], stats: { lectures: 0, sonnet: 0 } });
+learn.stats = learn.stats || { lectures: 0, sonnet: 0 };
+const saveLearn = () => { try { writeJson(LEARN_FILE, learn); } catch (e) {} };
+const plain = s => String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().replace(/[^A-Z]/g, '');
+function lev(a, b) { if (Math.abs(a.length - b.length) > 3) return 9; const d = Array.from({ length: a.length + 1 }, (_, i) => [i]); for (let j = 1; j <= b.length; j++) d[0][j] = j;
+  for (let i = 1; i <= a.length; i++) for (let j = 1; j <= b.length; j++) d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1)); return d[a.length][b.length]; }
+function apprendre(final, lu) {
+  // 1) annuaire : nom → prénom + compagnie
+  const k = plain(final.nom);
+  if (k.length >= 2) { const p = learn.personnes[k] || { n: 0 }; learn.personnes[k] = { nom: final.nom, prenom: final.prenom || p.prenom || '', cie: final.cie || p.cie || '', n: p.n + 1, last: Date.now() }; }
+  // 2) corrections : ce que l'IA avait lu ≠ ce que tu as validé
+  if (lu && typeof lu === 'object') for (const champ of ['numero', 'nom', 'prenom', 'cie']) {
+    const a = String(lu[champ] || '').trim(), b = String(final[champ] || '').trim();
+    if (b && a.toUpperCase() !== b.toUpperCase()) learn.corrections.push({ champ, lu: a.slice(0, 40), correct: b.slice(0, 40), ts: Date.now() });
+  }
+  learn.corrections = learn.corrections.slice(-40);
+  saveLearn();
+}
+// après lecture : on corrige l'orthographe et on complète grâce à l'annuaire
+function completerAvecAnnuaire(out) {
+  const k = plain(out.nom); if (k.length < 3) return out;
+  let best = null, bd = 9;
+  for (const [key, p] of Object.entries(learn.personnes)) { const d = key === k ? 0 : lev(key, k); if (d < bd || (d === bd && best && p.n > best.n)) { bd = d; best = p; } }
+  const tol = k.length >= 8 ? 2 : 1;
+  if (best && bd <= tol) {
+    if (bd > 0 && out.prenom && best.prenom && lev(plain(out.prenom), plain(best.prenom)) > 2) return out; // homonyme probable
+    out.nom = best.nom; if (!out.prenom || lev(plain(out.prenom), plain(best.prenom)) <= 2) out.prenom = best.prenom || out.prenom;
+    if (!out.cie && best.cie) out.cie = best.cie;
+    out.connu = true;
+  }
+  return out;
+}
+function leconsPourPrompt() {
+  const c = learn.corrections.filter(x => x.lu).slice(-12);
+  if (!c.length) return '';
+  return '\n\nErreurs déjà faites sur ces étiquettes (à ne pas refaire) :\n' + c.map(x => `- ${x.champ} lu « ${x.lu} » alors que c'était « ${x.correct} »`).join('\n');
+}
+
+// au premier démarrage, l'annuaire apprend des colis déjà enregistrés
+if (!Object.keys(learn.personnes).length) { for (const c of colis) if (c.nom) apprendre(c, null); }
 
 function save() {
   version = Date.now();
@@ -131,18 +176,18 @@ N'invente rien et ne devine pas : un champ dont tu n'es pas sûr reste vide (mie
 Si l'image est floue ou l'étiquette coupée, mets "illisible": true. Réponds TOUJOURS et UNIQUEMENT avec ce JSON, sans texte autour :
 {"numero":"","codes":[],"type":"C","nom":"","prenom":"","cie":"","produit":"","tel":"","infos":"","illisible":false}`;
 
-async function appelClaude(b64) {
+async function appelClaude(b64, model) {
   const ctl = new AbortController();
   const t = setTimeout(() => ctl.abort(), 45000);
   try {
-    const r = await fetch('https://api.anthropic.com/v1/messages', {
+    const r = await fetch((process.env.ANTHROPIC_BASE_URL || 'https://api.anthropic.com') + '/v1/messages', {
       method: 'POST', signal: ctl.signal,
       headers: { 'x-api-key': API_KEY, 'anthropic-version': '2023-06-01', 'content-type': 'application/json', ...(WORKSPACE ? { 'anthropic-workspace-id': WORKSPACE } : {}) },
       body: JSON.stringify({
-        model: MODEL, max_tokens: 600,
+        model, max_tokens: 600,
         messages: [{ role: 'user', content: [
           { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: b64 } },
-          { type: 'text', text: PROMPT }
+          { type: 'text', text: PROMPT + leconsPourPrompt() }
         ] }]
       })
     });
@@ -152,18 +197,30 @@ async function appelClaude(b64) {
   } finally { clearTimeout(t); }
 }
 
-async function lireEtiquette(b64) {
+async function lireAvec(b64, model) {
   let txt, last;
   for (let essai = 0; essai < 3; essai++) {
-    try { txt = await appelClaude(b64); break; }
+    try { txt = await appelClaude(b64, model); break; }
     catch (e) {
       last = e;
-      // surcharge / limite / réseau : on réessaie ; clé invalide ou crédit épuisé : inutile
       if (e.status && ![429, 500, 502, 503, 529].includes(e.status)) throw e;
       await new Promise(r => setTimeout(r, 1500 * (essai + 1)));
     }
   }
   if (txt === undefined) throw last;
+  return analyser(txt);
+}
+async function lireEtiquette(b64) {
+  learn.stats.lectures++;
+  let out = await lireAvec(b64, MODEL);
+  if ((!out.numero || !out.nom || out.illisible) && MODEL_FIABLE && MODEL_FIABLE !== MODEL) {
+    learn.stats.sonnet++;
+    try { const o2 = await lireAvec(b64, MODEL_FIABLE); if (o2.numero || o2.nom) out = o2; } catch (e) { console.error('fiable:', e.message); }
+  }
+  saveLearn();
+  return completerAvecAnnuaire(out);
+}
+function analyser(txt) {
   const m = txt.match(/\{[\s\S]*\}/);
   let o = {};
   try { o = m ? JSON.parse(m[0]) : { illisible: true }; } catch (e) { o = { illisible: true }; }
@@ -205,7 +262,7 @@ const server = http.createServer(async (req, res) => {
         sessions.delete(cookies(req).sid); writeJson(SESS_FILE, [...sessions]);
         return send(res, 200, { ok: true }, { 'Set-Cookie': 'sid=; Path=/; Max-Age=0' });
       }
-      if (p === '/api/me') return send(res, 200, { ok: true, lecture: API_KEY ? 'claude' : 'locale', signature: SIGNATURE });
+      if (p === '/api/me') return send(res, 200, { ok: true, lecture: API_KEY ? 'claude' : 'locale', signature: SIGNATURE, appris: Object.keys(learn.personnes).length, corrections: learn.corrections.length, stats: learn.stats });
 
       if (p === '/api/colis' && req.method === 'GET') {
         if (url.searchParams.get('v') === String(version)) return send(res, 200, { same: true, version });
@@ -228,7 +285,7 @@ const server = http.createServer(async (req, res) => {
           type: b.type === 'R' ? 'R' : 'C', cie: clean(b.cie, 30), vaguemestre: clean(b.vaguemestre, 60) || SIGNATURE,
           ts: Date.now(), etat: 'recu', reporteAt: null, remisAt: null
         };
-        colis.push(it); save();
+        colis.push(it); save(); apprendre(it, b.lu);
         return send(res, 201, { item: it, version });
       }
       if (/^\/api\/colis\/[a-f0-9]+$/.test(p) && req.method === 'DELETE') {
